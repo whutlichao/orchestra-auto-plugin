@@ -1,0 +1,516 @@
+{
+  "schema_version": 2,
+  "run": {
+    "phase": "implementation",
+    "status": "active",
+    "orca_run_id": null,
+    "health": "unknown",
+    "id": "fixture-active",
+    "target_repo": "/tmp/orchestra-auto-fixture-target",
+    "mode": "REAL",
+    "title": "Fixture: active run",
+    "observation_mode": "explicit-coordinator",
+    "started_at": "2026-11-03T15:21:09.955808+00:00",
+    "last_effective_progress": "2026-11-03T15:21:11.031291+00:00",
+    "updated_at": "2026-11-03T15:21:22.012360+00:00",
+    "last_observed": "2026-11-03T15:21:11.235693+00:00"
+  },
+  "tasks": {
+    "t-plan": {
+      "id": "t-plan",
+      "title": "Plan the protocol",
+      "dependencies": [],
+      "status": "accepted",
+      "blocked_reason": "",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:21:10.047230+00:00"
+    },
+    "t-panel": {
+      "id": "t-panel",
+      "title": "Build the read-only panel",
+      "dependencies": [
+        "t-plan"
+      ],
+      "status": "running",
+      "blocked_reason": "",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:21:10.140155+00:00"
+    },
+    "t-blocked": {
+      "id": "t-blocked",
+      "title": "Wait for audit access",
+      "dependencies": [
+        "t-plan"
+      ],
+      "status": "blocked",
+      "blocked_reason": "needs audit directory approval",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:21:10.229910+00:00"
+    },
+    "t-decision": {
+      "id": "t-decision",
+      "title": "Publish docs",
+      "dependencies": [],
+      "status": "waiting_user",
+      "blocked_reason": "",
+      "pending_decision": "publish to the Git install source?",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:21:10.327426+00:00"
+    },
+    "t-extra": {
+      "id": "t-extra",
+      "title": "Add a path-safety test",
+      "dependencies": [
+        "t-panel"
+      ],
+      "status": "pending",
+      "blocked_reason": "",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:21:10.415671+00:00"
+    }
+  },
+  "workers": {
+    "w-plan-a1": {
+      "id": "w-plan-a1",
+      "lifecycle": "closed",
+      "reported_lifecycle": "reported_done",
+      "start_confirmation": "observed",
+      "last_effective_progress": "2026-11-03T15:21:10.506359+00:00",
+      "parent_worker_id": null,
+      "task_id": "t-plan",
+      "dispatch_id": "d-plan",
+      "attempt": 1,
+      "worktree": "fixture-worktree",
+      "reported_summary": "design ready",
+      "last_observed": "2026-11-03T15:21:10.506359+00:00",
+      "verified_at": "2026-11-03T15:21:10.506359+00:00"
+    },
+    "w-panel-a1": {
+      "id": "w-panel-a1",
+      "lifecycle": "running",
+      "reported_lifecycle": "unknown",
+      "start_confirmation": "observed",
+      "last_effective_progress": "2026-11-03T15:21:10.595442+00:00",
+      "parent_worker_id": null,
+      "task_id": "t-panel",
+      "dispatch_id": "d-panel",
+      "attempt": 1,
+      "worktree": "fixture-worktree",
+      "last_observed": "2026-11-03T15:21:10.777415+00:00",
+      "verified_at": "2026-11-03T15:21:10.595442+00:00"
+    },
+    "w-lost-a2": {
+      "id": "w-lost-a2",
+      "lifecycle": "lost",
+      "reported_lifecycle": "unknown",
+      "start_confirmation": "unobserved",
+      "last_effective_progress": null,
+      "parent_worker_id": null,
+      "task_id": "t-panel",
+      "dispatch_id": "d-panel",
+      "attempt": 2,
+      "worktree": "fixture-worktree",
+      "last_observed": "2026-11-03T15:21:10.688051+00:00",
+      "verified_at": "2026-11-03T15:21:10.688051+00:00"
+    }
+  },
+  "deliveries": {
+    "t-plan": {
+      "task_id": "t-plan",
+      "implemented": true,
+      "integrated": true,
+      "merged": true,
+      "tracker_closed": false,
+      "evidence": [
+        "https://example.invalid/pr/1",
+        "deadbeef"
+      ],
+      "verified_at": "2026-11-03T15:21:11.031291+00:00"
+    },
+    "t-panel": {
+      "task_id": "t-panel",
+      "implemented": false,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null,
+      "evidence": [],
+      "verified_at": "2026-11-03T15:21:11.138243+00:00"
+    },
+    "t-blocked": {
+      "task_id": "t-blocked",
+      "implemented": null,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null
+    },
+    "t-decision": {
+      "task_id": "t-decision",
+      "implemented": null,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null
+    },
+    "t-extra": {
+      "task_id": "t-extra",
+      "implemented": null,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null
+    }
+  },
+  "artifacts": {
+    "a-report": {
+      "id": "a-report",
+      "task_id": "t-plan",
+      "kind": "report",
+      "label": "Acceptance report",
+      "reference": "https://example.invalid/report",
+      "recorded_at": "2026-11-03T15:21:11.235693+00:00"
+    }
+  },
+  "events": [
+    {
+      "id": "init-1",
+      "at": "2026-11-03T15:21:09.955808+00:00",
+      "type": "init",
+      "source": "coordinator",
+      "summary": "init recorded",
+      "entity_id": "fixture-active"
+    },
+    {
+      "id": "task-plan",
+      "at": "2026-11-03T15:21:10.047230+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-plan",
+      "summary": "task recorded",
+      "entity_id": "t-plan"
+    },
+    {
+      "id": "task-panel",
+      "at": "2026-11-03T15:21:10.140155+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "summary": "task recorded",
+      "entity_id": "t-panel"
+    },
+    {
+      "id": "task-blocked",
+      "at": "2026-11-03T15:21:10.229910+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-blocked",
+      "summary": "task recorded",
+      "entity_id": "t-blocked"
+    },
+    {
+      "id": "task-decision",
+      "at": "2026-11-03T15:21:10.327426+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-decision",
+      "summary": "task recorded",
+      "entity_id": "t-decision"
+    },
+    {
+      "id": "task-extra",
+      "at": "2026-11-03T15:21:10.415671+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-extra",
+      "summary": "task recorded",
+      "entity_id": "t-extra"
+    },
+    {
+      "id": "worker-plan",
+      "at": "2026-11-03T15:21:10.506359+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t-plan",
+      "worker_id": "w-plan-a1",
+      "summary": "worker recorded",
+      "entity_id": "w-plan-a1"
+    },
+    {
+      "id": "worker-panel",
+      "at": "2026-11-03T15:21:10.595442+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "worker_id": "w-panel-a1",
+      "summary": "worker recorded",
+      "entity_id": "w-panel-a1"
+    },
+    {
+      "id": "worker-lost",
+      "at": "2026-11-03T15:21:10.688051+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "worker_id": "w-lost-a2",
+      "summary": "worker recorded",
+      "entity_id": "w-lost-a2"
+    },
+    {
+      "id": "event-dispatch",
+      "at": "2026-11-03T15:21:10.777415+00:00",
+      "type": "dispatch",
+      "source": "coordinator",
+      "summary": "dispatched the panel worker",
+      "task_id": "t-panel",
+      "worker_id": "w-panel-a1",
+      "dispatch_id": "d-panel",
+      "attempt": 1,
+      "evidence": [
+        "https://example.invalid/evidence/dispatch"
+      ],
+      "entity_id": "t-panel"
+    },
+    {
+      "id": "delivery-plan",
+      "at": "2026-11-03T15:21:11.031291+00:00",
+      "type": "delivery",
+      "source": "coordinator",
+      "task_id": "t-plan",
+      "evidence": [
+        "https://example.invalid/pr/1",
+        "deadbeef"
+      ],
+      "summary": "delivery recorded",
+      "entity_id": "t-plan"
+    },
+    {
+      "id": "delivery-panel",
+      "at": "2026-11-03T15:21:11.138243+00:00",
+      "type": "delivery",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "evidence": [],
+      "summary": "delivery recorded",
+      "entity_id": "t-panel"
+    },
+    {
+      "id": "artifact-report",
+      "at": "2026-11-03T15:21:11.235693+00:00",
+      "type": "artifact",
+      "source": "coordinator",
+      "task_id": "t-plan",
+      "summary": "artifact recorded",
+      "entity_id": "a-report"
+    },
+    {
+      "id": "event-bookkeeping",
+      "at": "2026-11-03T15:21:22.012360+00:00",
+      "type": "reconcile",
+      "source": "coordinator",
+      "summary": "backfilled the worker row",
+      "task_id": "t-panel",
+      "worker_id": "w-panel-a1",
+      "dispatch_id": "d-panel",
+      "attempt": 1,
+      "entity_id": "t-panel",
+      "bookkeeping": true
+    }
+  ],
+  "receipts": {
+    "init-1": {
+      "command": "init",
+      "data": {
+        "id": "fixture-active",
+        "target_repo": "/tmp/orchestra-auto-fixture-target",
+        "mode": "REAL",
+        "phase": "implementation",
+        "status": "active",
+        "title": "Fixture: active run"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "task-plan": {
+      "command": "task",
+      "data": {
+        "id": "t-plan",
+        "title": "Plan the protocol",
+        "dependencies": [],
+        "status": "accepted"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-panel": {
+      "command": "task",
+      "data": {
+        "id": "t-panel",
+        "title": "Build the read-only panel",
+        "dependencies": [
+          "t-plan"
+        ],
+        "status": "running"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-blocked": {
+      "command": "task",
+      "data": {
+        "id": "t-blocked",
+        "title": "Wait for audit access",
+        "dependencies": [
+          "t-plan"
+        ],
+        "status": "blocked",
+        "blocked_reason": "needs audit directory approval"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-decision": {
+      "command": "task",
+      "data": {
+        "id": "t-decision",
+        "title": "Publish docs",
+        "dependencies": [],
+        "status": "waiting_user",
+        "pending_decision": "publish to the Git install source?"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-extra": {
+      "command": "task",
+      "data": {
+        "id": "t-extra",
+        "title": "Add a path-safety test",
+        "dependencies": [
+          "t-panel"
+        ],
+        "status": "pending"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "worker-plan": {
+      "command": "worker",
+      "data": {
+        "id": "w-plan-a1",
+        "task_id": "t-plan",
+        "dispatch_id": "d-plan",
+        "attempt": 1,
+        "worktree": "fixture-worktree",
+        "lifecycle": "closed",
+        "start_confirmation": "observed",
+        "reported_lifecycle": "reported_done",
+        "reported_summary": "design ready"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "worker-panel": {
+      "command": "worker",
+      "data": {
+        "id": "w-panel-a1",
+        "task_id": "t-panel",
+        "dispatch_id": "d-panel",
+        "attempt": 1,
+        "worktree": "fixture-worktree",
+        "lifecycle": "running",
+        "start_confirmation": "observed",
+        "reported_lifecycle": "unknown"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "worker-lost": {
+      "command": "worker",
+      "data": {
+        "id": "w-lost-a2",
+        "task_id": "t-panel",
+        "dispatch_id": "d-panel",
+        "attempt": 2,
+        "worktree": "fixture-worktree",
+        "lifecycle": "lost",
+        "start_confirmation": "unobserved"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "event-dispatch": {
+      "command": "event",
+      "data": {
+        "type": "dispatch",
+        "summary": "dispatched the panel worker",
+        "task_id": "t-panel",
+        "worker_id": "w-panel-a1",
+        "dispatch_id": "d-panel",
+        "attempt": 1,
+        "evidence": [
+          "https://example.invalid/evidence/dispatch"
+        ]
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "delivery-plan": {
+      "command": "delivery",
+      "data": {
+        "task_id": "t-plan",
+        "implemented": true,
+        "integrated": true,
+        "merged": true,
+        "tracker_closed": false,
+        "evidence": [
+          "https://example.invalid/pr/1",
+          "deadbeef"
+        ]
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "delivery-panel": {
+      "command": "delivery",
+      "data": {
+        "task_id": "t-panel",
+        "implemented": false,
+        "evidence": []
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "artifact-report": {
+      "command": "artifact",
+      "data": {
+        "id": "a-report",
+        "task_id": "t-plan",
+        "kind": "report",
+        "label": "Acceptance report",
+        "reference": "https://example.invalid/report"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "event-bookkeeping": {
+      "command": "event",
+      "data": {
+        "type": "reconcile",
+        "summary": "backfilled the worker row",
+        "task_id": "t-panel",
+        "worker_id": "w-panel-a1",
+        "dispatch_id": "d-panel",
+        "attempt": 1
+      },
+      "source": "coordinator",
+      "effective": false,
+      "bookkeeping": true
+    }
+  }
+}
