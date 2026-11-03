@@ -20,7 +20,6 @@ const task = (
   pendingDecision: '',
   provisional: false,
   orcaTaskId: null,
-  verifiedAt: observed,
   ...overrides
 })
 
@@ -40,7 +39,6 @@ const worker = (
   reportedSummary: '',
   worktree: 'demo-worktree',
   lastObservedAt: observed,
-  verifiedAt: observed,
   freshness: 'current' as const,
   ...overrides
 })
@@ -58,7 +56,6 @@ export const sampleView: RunView = {
     '演示数据：包含运行中的任务、阻塞与待决事项、失联 Worker，以及 true/false/未核验三种交付事实。',
   orcaRunId: 'run_demo00000000',
   startedAt: started,
-  updatedAt: observed,
   lastObservedAt: observed,
   lastEffectiveProgressAt: observed,
   endedAt: null,
@@ -237,7 +234,7 @@ export const sampleView: RunView = {
   warnings: ['示例数据仅用于界面演示']
 }
 
-export const sampleSecondView: RunView = {
+export const sampleFinishedView: RunView = {
   ...sampleView,
   id: 'demo-finished',
   title: '示例：已完成运行',
@@ -268,35 +265,24 @@ export const sampleSecondView: RunView = {
   warnings: []
 }
 
-const activeSummary: RunSummary = {
-  id: sampleView.id,
-  label: sampleView.title,
-  source: 'audit-root' as const,
-  availability: 'available' as const,
-  problem: null,
-  status: sampleView.status,
-  health: sampleView.health,
-  mode: sampleView.mode,
-  phase: sampleView.phase,
-  observedAt: sampleView.lastObservedAt,
-  endedAt: sampleView.endedAt,
-  taskCount: sampleView.taskCounts.total
+function summaryOf(view: RunView): RunSummary {
+  return {
+    id: view.id,
+    label: view.title,
+    source: 'audit-root',
+    availability: 'available',
+    problem: null,
+    status: view.status,
+    health: view.health,
+    mode: view.mode,
+    observedAt: view.lastObservedAt,
+    taskCount: view.taskCounts.total
+  }
 }
 
-export const finishedSummary: RunSummary = {
-  id: sampleSecondView.id,
-  label: sampleSecondView.title,
-  source: 'audit-root' as const,
-  availability: 'available' as const,
-  problem: null,
-  status: sampleSecondView.status,
-  health: sampleSecondView.health,
-  mode: sampleSecondView.mode,
-  phase: sampleSecondView.phase,
-  observedAt: sampleSecondView.lastObservedAt,
-  endedAt: sampleSecondView.endedAt,
-  taskCount: sampleSecondView.taskCounts.total
-}
+const activeSummary = summaryOf(sampleView)
+
+export const finishedSummary = summaryOf(sampleFinishedView)
 
 export const corruptSummary: RunSummary = {
   id: 'demo-corrupt',
@@ -307,9 +293,7 @@ export const corruptSummary: RunSummary = {
   status: 'unknown' as const,
   health: 'unknown' as const,
   mode: 'unknown' as const,
-  phase: '',
   observedAt: null,
-  endedAt: null,
   taskCount: 0
 }
 
@@ -322,9 +306,7 @@ export const unavailableSummary: RunSummary = {
   status: 'unknown' as const,
   health: 'unknown' as const,
   mode: 'unknown' as const,
-  phase: '',
   observedAt: null,
-  endedAt: null,
   taskCount: 0
 }
 
@@ -332,25 +314,19 @@ export const sampleListing: RunListing = {
   configured: true,
   runs: [activeSummary, finishedSummary, corruptSummary, unavailableSummary],
   warnings: ['有 2 个运行不可用或损坏'],
-  rootProblems: [],
-  truncated: false,
-  scannedAt: observed
+  rootProblems: []
 }
 
 export const emptyListing: RunListing = {
   configured: true,
   runs: [],
   warnings: [],
-  rootProblems: [],
-  truncated: false,
-  scannedAt: observed
+  rootProblems: []
 }
 
 export const unconfiguredListing: RunListing = {
   configured: false,
   runs: [],
   warnings: [],
-  rootProblems: [],
-  truncated: false,
-  scannedAt: observed
+  rootProblems: []
 }

@@ -9,7 +9,7 @@ import * as panel from './panel'
 import {
   corruptSummary,
   sampleListing,
-  sampleSecondView,
+  sampleFinishedView,
   sampleView,
   unavailableSummary
 } from './sample-data'
@@ -36,7 +36,7 @@ test('UI evidence: select another run and refresh the listing', async () => {
           return sampleListing
         },
         'run.get': (input: unknown) =>
-          (input as { runId: string }).runId === 'demo-finished' ? sampleSecondView : sampleView
+          (input as { runId: string }).runId === 'demo-finished' ? sampleFinishedView : sampleView
       }
     })
   })

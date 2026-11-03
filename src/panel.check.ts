@@ -7,7 +7,7 @@ import {
   emptyListing,
   finishedSummary,
   sampleListing,
-  sampleSecondView,
+  sampleFinishedView,
   sampleView,
   unconfiguredListing,
   unavailableSummary
@@ -33,7 +33,7 @@ export default defineCheck({
   finished: {
     requests: {
       'runs.list': () => ({ ...sampleListing, runs: [finishedSummary], warnings: [] }),
-      'run.get': () => sampleSecondView
+      'run.get': () => sampleFinishedView
     }
   },
   stale: {

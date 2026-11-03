@@ -23,16 +23,13 @@ import {
 import { homedir } from 'node:os'
 import { isAbsolute, join, parse as parsePath, relative, resolve, sep } from 'node:path'
 import {
+  CORRUPT_PROBLEMS,
   MAX_SNAPSHOT_BYTES,
   PROBLEM_TEXT,
   RUN_LABEL_MAX_CHARS,
-  SnapshotError,
   cleanText,
   isPortableId,
   isRecord,
-  labelFor,
-  parseSnapshot,
-  projectRun,
   type RunAvailability,
   type RunListing,
   type RunMode,
@@ -43,6 +40,8 @@ import {
   type RunView,
   type RootProblem
 } from './contract'
+import { SnapshotError, parseSnapshot } from './snapshot'
+import { labelFor, projectRun } from './projection'
 
 const MAX_ROOTS = 16
 const MAX_REGISTRY_FILES = 200
@@ -51,12 +50,6 @@ const MAX_RUNS = 200
 const MAX_DISCOVERY_BYTES = 64 * 1024 * 1024
 const MAX_DESCRIPTOR_BYTES = 64 * 1024
 const DESCRIPTOR_FIELDS = new Set(['run_id', 'state_path', 'registered_at', 'label'])
-const CORRUPT_PROBLEMS = new Set<RunProblemCode>([
-  'invalid_json',
-  'unsupported_schema',
-  'invalid_shape',
-  'too_large'
-])
 
 const NO_FOLLOW = (constants as Record<string, number>).O_NOFOLLOW ?? 0
 
@@ -67,7 +60,6 @@ export type DiscoverySettings = {
 
 export type RunEntry = {
   summary: RunSummary
-  stateDir: string | null
   view: RunView | null
 }
 
@@ -101,7 +93,6 @@ type ScanContext = {
   roots: string[]
   warnings: string[]
   rootProblems: RootProblem[]
-  truncated: boolean
   bytesRead: number
   stop: boolean
 }
@@ -218,7 +209,6 @@ function parseRoots(raw: unknown, ctx: ScanContext): void {
     .map((line) => line.trim())
     .filter(Boolean)
   if (lines.length > MAX_ROOTS) {
-    ctx.truncated = true
     ctx.warnings.push('审计目录超过 ' + MAX_ROOTS + ' 个；只使用前 ' + MAX_ROOTS + ' 个')
   }
   const seen = new Set<string>()
@@ -374,9 +364,7 @@ function summaryFor(
     status: (view?.status ?? 'unknown') as RunStatus,
     health: view?.health ?? 'unknown',
     mode: (view?.mode ?? 'unknown') as RunMode,
-    phase: view?.phase ?? '',
     observedAt: view?.lastObservedAt ?? null,
-    endedAt: view?.endedAt ?? null,
     taskCount: view?.taskCounts.total ?? 0
   }
 }
@@ -400,16 +388,20 @@ function setEntry(
   ctx.warnings.push('审计目录中有重复 Run ID：' + entry.summary.id + '；只保留一个')
 }
 
-function addUnavailable(
-  entries: Map<string, RunEntry>,
-  id: string,
-  label: string,
-  source: RunSource,
-  problem: RunProblemCode,
-  ctx: ScanContext,
+type EntryTarget = {
+  id: string
+  labelHint: string
+  source: RunSource
   override: boolean
+}
+
+function markUnavailable(
+  entries: Map<string, RunEntry>,
+  target: EntryTarget,
+  problem: RunProblemCode,
+  ctx: ScanContext
 ): void {
-  if (!isPortableId(id)) {
+  if (!isPortableId(target.id)) {
     ctx.warnings.push('审计目录中有不可读的运行，目录名不能作为 Run ID')
     return
   }
@@ -417,17 +409,16 @@ function addUnavailable(
     entries,
     {
       summary: summaryFor(
-        id,
-        label || id,
-        source,
+        target.id,
+        target.labelHint || target.id,
+        target.source,
         CORRUPT_PROBLEMS.has(problem) ? 'corrupt' : 'unavailable',
         problem
       ),
-      stateDir: null,
       view: null
     },
     ctx,
-    override
+    target.override
   )
 }
 
@@ -455,50 +446,57 @@ function readSnapshotAt(dir: string, source: RunSource, ctx: ScanContext): RunVi
     throw new SafetyError('too_large', 'progress.json is larger than the read limit')
   }
   if (ctx.bytesRead + stat.size > MAX_DISCOVERY_BYTES) {
-    ctx.truncated = true
     ctx.stop = true
     ctx.warnings.push('本次读取达到 64 MiB 上限；部分运行未列出')
     throw new BudgetExceeded()
   }
   ctx.bytesRead += stat.size
-  const raw = readTextFile(path, MAX_SNAPSHOT_BYTES)
-  const snapshot = parseSnapshot(raw)
-  return projectRun(snapshot, { source, now: ctx.now })
+  return projectRun(parseSnapshot(readTextFile(path, MAX_SNAPSHOT_BYTES)), {
+    source,
+    now: ctx.now
+  })
 }
 
-function addRun(
+/**
+ * Load one run into `entries`, or record why it cannot be read. A run whose
+ * error carries no stable ID (an audit-root scan) is re-thrown so the caller
+ * can name it from the directory; a budget stop ends the whole pass.
+ */
+function loadRun(
   entries: Map<string, RunEntry>,
   stateDir: string,
-  source: RunSource,
-  labelHint: string,
-  idHint: string | null,
-  ctx: ScanContext,
-  override: boolean
+  target: EntryTarget,
+  ctx: ScanContext
 ): void {
   let view: RunView
   try {
-    view = readSnapshotAt(stateDir, source, ctx)
+    view = readSnapshotAt(stateDir, target.source, ctx)
   } catch (error) {
     if (error instanceof BudgetExceeded) throw error
-    const fallbackId = idHint ?? ''
-    if (!fallbackId) throw error
-    addUnavailable(entries, fallbackId, labelHint, source, problemCode(error), ctx, override)
+    if (!target.id) throw error
+    markUnavailable(entries, target, problemCode(error), ctx)
     return
   }
-  const id = idHint ?? view.id
-  if (idHint && idHint !== view.id) {
+  const id = target.id || view.id
+  if (target.id && target.id !== view.id) {
     view.warnings.push('注册表 Run ID 与快照 run.id 不一致')
-    ctx.warnings.push('注册表 Run ID 与快照 run.id 不一致：' + idHint)
+    ctx.warnings.push('注册表 Run ID 与快照 run.id 不一致：' + target.id)
   }
   setEntry(
     entries,
     {
-      summary: summaryFor(id, labelFor(view, labelHint), source, 'available', null, view),
-      stateDir,
+      summary: summaryFor(
+        id,
+        labelFor(view, target.labelHint),
+        target.source,
+        'available',
+        null,
+        view
+      ),
       view
     },
     ctx,
-    override
+    target.override
   )
 }
 
@@ -507,27 +505,23 @@ function scanRoot(
   entries: Map<string, RunEntry>,
   ctx: ScanContext
 ): void {
+  const rootName = parsePath(root).base
   const rootProbe = probeProgress(root)
-  if (rootProbe !== 'missing') {
-    const name = parsePath(root).base
-    if (rootProbe === 'file') {
-      try {
-        addRun(entries, root, 'audit-root', '', null, ctx, false)
-      } catch (error) {
-        if (error instanceof BudgetExceeded) return
-        addUnavailable(entries, name, name, 'audit-root', problemCode(error), ctx, false)
-      }
-    } else {
-      addUnavailable(
-        entries,
-        name,
-        name,
-        'audit-root',
-        rootProbe === 'symlink' ? 'symlink' : 'unreadable',
-        ctx,
-        false
-      )
+  if (rootProbe === 'file') {
+    const target: EntryTarget = { id: '', labelHint: '', source: 'audit-root', override: false }
+    try {
+      loadRun(entries, root, target, ctx)
+    } catch (error) {
+      if (error instanceof BudgetExceeded) return
+      markUnavailable(entries, { ...target, id: rootName, labelHint: rootName }, problemCode(error), ctx)
     }
+  } else if (rootProbe !== 'missing') {
+    markUnavailable(
+      entries,
+      { id: rootName, labelHint: rootName, source: 'audit-root', override: false },
+      rootProbe === 'symlink' ? 'symlink' : 'unreadable',
+      ctx
+    )
   }
 
   let dirents
@@ -542,8 +536,7 @@ function scanRoot(
   let symlinks = 0
   for (const dirent of dirents) {
     if (scanned >= MAX_SCAN_DIRS) {
-      ctx.truncated = true
-      ctx.warnings.push('审计目录条目超过 ' + MAX_SCAN_DIRS + ' 个；部分目录未扫描')
+        ctx.warnings.push('审计目录条目超过 ' + MAX_SCAN_DIRS + ' 个；部分目录未扫描')
       break
     }
     scanned += 1
@@ -556,24 +549,27 @@ function scanRoot(
     const child = join(root, dirent.name)
     const probe = probeProgress(child)
     if (probe === 'missing') continue
-    if (probe === 'file') {
-      try {
-        addRun(entries, child, 'audit-root', '', null, ctx, false)
-      } catch (error) {
-        if (error instanceof BudgetExceeded) return
-        addUnavailable(entries, dirent.name, dirent.name, 'audit-root', problemCode(error), ctx, false)
-      }
+    if (probe !== 'file') {
+      markUnavailable(
+        entries,
+        { id: dirent.name, labelHint: dirent.name, source: 'audit-root', override: false },
+        probe === 'symlink' ? 'symlink' : 'unreadable',
+        ctx
+      )
       continue
     }
-    addUnavailable(
-      entries,
-      dirent.name,
-      dirent.name,
-      'audit-root',
-      probe === 'symlink' ? 'symlink' : 'unreadable',
-      ctx,
-      false
-    )
+    const target: EntryTarget = { id: '', labelHint: '', source: 'audit-root', override: false }
+    try {
+      loadRun(entries, child, target, ctx)
+    } catch (error) {
+      if (error instanceof BudgetExceeded) return
+      markUnavailable(
+        entries,
+        { ...target, id: dirent.name, labelHint: dirent.name },
+        problemCode(error),
+        ctx
+      )
+    }
   }
   if (symlinks > 0) {
     ctx.warnings.push('审计目录中有符号链接条目，已跳过')
@@ -617,7 +613,6 @@ function collectRegistry(
     return
   }
   if (names.length > MAX_REGISTRY_FILES) {
-    ctx.truncated = true
     ctx.warnings.push('注册表条目超过 ' + MAX_REGISTRY_FILES + ' 个；只读取前 ' + MAX_REGISTRY_FILES + ' 个')
     names = names.slice(0, MAX_REGISTRY_FILES)
   }
@@ -630,10 +625,20 @@ function collectRegistry(
     try {
       const descriptor = readDescriptor(join(runsDir, name), stem)
       const stateDir = resolveStatePath(descriptor.statePath, ctx.roots)
-      addRun(entries, stateDir, 'registry', descriptor.label, descriptor.id, ctx, true)
+      loadRun(
+        entries,
+        stateDir,
+        { id: descriptor.id, labelHint: descriptor.label, source: 'registry', override: true },
+        ctx
+      )
     } catch (error) {
       if (error instanceof BudgetExceeded) return
-      addUnavailable(entries, stem, stem, 'registry', problemCode(error, 'invalid_descriptor'), ctx, true)
+      markUnavailable(
+        entries,
+        { id: stem, labelHint: stem, source: 'registry', override: true },
+        problemCode(error, 'invalid_descriptor'),
+        ctx
+      )
     }
   }
 }
@@ -652,7 +657,6 @@ export function discoverRuns(settings: DiscoverySettings): DiscoveryResult {
     roots: [],
     warnings: [],
     rootProblems: [],
-    truncated: false,
     bytesRead: 0,
     stop: false
   }
@@ -680,7 +684,6 @@ export function discoverRuns(settings: DiscoverySettings): DiscoveryResult {
       a.id.localeCompare(b.id)
   })
   if (runs.length > MAX_RUNS) {
-    ctx.truncated = true
     ctx.warnings.push('运行数量超过 ' + MAX_RUNS + ' 个；只列出前 ' + MAX_RUNS + ' 个')
     runs.length = MAX_RUNS
   }
@@ -694,9 +697,7 @@ export function discoverRuns(settings: DiscoverySettings): DiscoveryResult {
       configured,
       runs,
       warnings,
-      rootProblems: ctx.rootProblems,
-      truncated: ctx.truncated,
-      scannedAt: now
+      rootProblems: ctx.rootProblems
     },
     entries
   }

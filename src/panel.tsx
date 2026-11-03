@@ -5,7 +5,6 @@
 // only recorded facts. Missing, stale, corrupt and unavailable states are
 // rendered as such; a missing delivery is never shown as success.
 import {
-  atom,
   Badge,
   Button,
   Callout,
@@ -14,25 +13,23 @@ import {
   Heading,
   IconButton,
   KeyValue,
-  plugin,
   read,
   RelativeTime,
   Row,
   Select,
   Separator,
   set,
-  settings,
   Spinner,
   Stack,
   Table,
   Tab,
   Tabs,
-  Text,
-  type PanelContext
+  Text
 } from 'orca'
 import {
   DELIVERY_FIELDS,
   STALE_SECONDS,
+  cleanText,
   type ArtifactView,
   type DeliveryField,
   type EventView,
@@ -50,9 +47,22 @@ import {
   type TaskView,
   type WorkerLifecycle
 } from './contract'
+import {
+  detail,
+  detailError,
+  detailLoading,
+  listing,
+  listingError,
+  loading,
+  refresh,
+  selectRun,
+  selectedRunId,
+  selectedTab
+} from './panel-state'
 
 type Tone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
-type PanelError = { code: string; message: string }
+
+export { setup } from './panel-state'
 
 const TASK_LIMIT = 100
 const WORKER_LIMIT = 100
@@ -136,93 +146,54 @@ const AVAILABILITY_LABEL: Record<RunAvailability, string> = {
   corrupt: '损坏'
 }
 
-const ERROR_TEXT: Record<string, string> = {
-  configuration_missing: '未配置审计目录',
-  audit_roots_invalid: '没有可用的审计目录',
-  invalid_params: '请求参数无效',
-  invalid_run_id: '运行 ID 无效',
-  run_not_found: '这个运行已不存在',
-  run_unavailable: '该运行不可用',
-  run_corrupt: '该运行的 progress.json 损坏或不受支持',
-  read_failed: '读取运行数据失败',
-  timeout: '读取超时',
-  unavailable: 'worker 尚未启动或不可用',
-  unknown_method: 'worker 不支持该请求',
-  capability_denied: '缺少读取设置的权限',
-  consent_required: '插件尚未获得授权',
-  not_permitted: '当前上下文不允许读取',
-  action_failed: '读取失败'
+// A completed status is recorded state, not a claim that every delivery is
+// verified, so it keeps the neutral tone.
+const RUN_STATUS_TONE: Record<RunStatus, Tone> = {
+  unknown: 'neutral',
+  active: 'accent',
+  waiting_user: 'warning',
+  failed: 'danger',
+  paused: 'warning',
+  completed: 'neutral',
+  cancelled: 'neutral'
 }
 
-const listing = atom<RunListing | null>(null)
-const listingError = atom<PanelError | null>(null)
-const detail = atom<RunView | null>(null)
-const detailError = atom<PanelError | null>(null)
-const loading = atom(false)
-const detailLoading = atom(false)
-const selectedRunId = atom('selectedRunId', '', { persist: 'plugin' })
-const selectedTab = atom('selectedTab', 'overview', { persist: 'plugin' })
-
-let generation = 0
-
-function panelError(error: unknown): PanelError {
-  if (typeof error === 'object' && error !== null) {
-    const code = (error as { code?: unknown }).code
-    if (typeof code === 'string') {
-      if (code === 'run_unavailable' || code === 'run_corrupt') {
-        const message = (error as { message?: unknown }).message
-        if (typeof message === 'string' && message.length > 0 && message.length <= 200) {
-          return { code, message }
-        }
-      }
-      return { code, message: ERROR_TEXT[code] ?? ERROR_TEXT.action_failed }
-    }
-  }
-  return { code: 'action_failed', message: ERROR_TEXT.action_failed }
+const HEALTH_TONE: Record<RunHealth, Tone> = {
+  healthy: 'success',
+  degraded: 'warning',
+  blocked: 'warning',
+  lost: 'danger',
+  unknown: 'neutral'
 }
 
-function truncate(value: string, max: number): string {
-  if (value.length <= max) return value
-  return value.slice(0, max - 1) + '…'
+const MODE_TONE: Record<RunMode, Tone> = {
+  REAL: 'accent',
+  DEMO: 'warning',
+  unknown: 'neutral'
 }
 
-function runStatusTone(status: RunStatus): Tone {
-  if (status === 'active') return 'accent'
-  if (status === 'waiting_user' || status === 'paused') return 'warning'
-  if (status === 'failed') return 'danger'
-  // A completed status is recorded state, not a claim that every delivery is verified.
-  return 'neutral'
+const AVAILABILITY_TONE: Record<RunAvailability, Tone> = {
+  available: 'neutral',
+  unavailable: 'warning',
+  corrupt: 'danger'
 }
 
-function healthTone(health: RunHealth): Tone {
-  if (health === 'healthy') return 'success'
-  if (health === 'lost') return 'danger'
-  if (health === 'degraded' || health === 'blocked') return 'warning'
-  return 'neutral'
+const DELIVERY_LABEL: Record<DeliveryField, string> = {
+  implemented: '已实施',
+  integrated: '已集成',
+  merged: '已合并',
+  tracker_closed: 'tracker 关闭'
+}
+
+const ERROR_TITLE: Record<string, string> = {
+  run_corrupt: '快照损坏',
+  run_unavailable: '运行不可用',
+  run_not_found: '运行不存在',
+  timeout: '读取超时'
 }
 
 function freshnessTone(freshness: Freshness): Tone {
   return freshness === 'stale' ? 'warning' : 'neutral'
-}
-
-function modeTone(mode: RunMode): Tone {
-  if (mode === 'DEMO') return 'warning'
-  if (mode === 'REAL') return 'accent'
-  return 'neutral'
-}
-
-function taskTone(status: TaskStatus): Tone {
-  if (status === 'accepted') return 'success'
-  if (status === 'running') return 'accent'
-  if (status === 'blocked' || status === 'waiting_user') return 'warning'
-  if (status === 'failed' || status === 'rejected') return 'danger'
-  return 'neutral'
-}
-
-function availabilityTone(availability: RunAvailability): Tone {
-  if (availability === 'corrupt') return 'danger'
-  if (availability === 'unavailable') return 'warning'
-  return 'neutral'
 }
 
 function truthLabel(value: boolean | null): string {
@@ -236,12 +207,12 @@ function taskNote(task: TaskView): string {
   if (task.provisional) notes.push('临时')
   if (task.blockedReason) notes.push('阻塞：' + task.blockedReason)
   if (task.pendingDecision) notes.push('待决：' + task.pendingDecision)
-  return truncate(notes.join('；') || '—', 180)
+  return cleanText(notes.join('；') || '—', 180)
 }
 
 function optionLabel(run: RunSummary): string {
   const suffix = run.availability === 'available' ? '' : ' · ' + AVAILABILITY_LABEL[run.availability]
-  return truncate(RUN_STATUS_LABEL[run.status] + ' · ' + run.label + suffix, 100)
+  return cleanText(RUN_STATUS_LABEL[run.status] + ' · ' + run.label + suffix, 100)
 }
 
 function summaryLabel(run: RunSummary | undefined): string {
@@ -249,89 +220,8 @@ function summaryLabel(run: RunSummary | undefined): string {
   return run.label || run.id
 }
 
-function errorTitle(error: PanelError): string {
-  if (error.code === 'run_corrupt') return '快照损坏'
-  if (error.code === 'run_unavailable') return '运行不可用'
-  if (error.code === 'run_not_found') return '运行不存在'
-  if (error.code === 'timeout') return '读取超时'
-  return '读取失败'
-}
-
-function deliveryFieldLabel(field: DeliveryField): string {
-  if (field === 'implemented') return '已实施'
-  if (field === 'integrated') return '已集成'
-  if (field === 'merged') return '已合并'
-  return 'tracker 关闭'
-}
-
-async function loadRun(runId: string, current: number): Promise<void> {
-  set(detailLoading, true)
-  set(detailError, null)
-  try {
-    const view = await plugin.request('run.get', { runId })
-    if (current !== generation) return
-    set(detail, view)
-  } catch (error) {
-    if (current !== generation) return
-    set(detail, null)
-    set(detailError, panelError(error))
-  } finally {
-    if (current === generation) set(detailLoading, false)
-  }
-}
-
-async function refresh(preferredId?: string): Promise<void> {
-  const current = ++generation
-  set(loading, true)
-  set(detailLoading, false)
-  set(listingError, null)
-  try {
-    const next = await plugin.request('runs.list')
-    if (current !== generation) return
-    set(listing, next)
-    const wanted = preferredId ?? read(selectedRunId)
-    const selected = next.runs.find((run) => run.id === wanted) ?? next.runs[0]
-    if (!selected) {
-      set(selectedRunId, '')
-      set(detail, null)
-      set(detailError, null)
-      return
-    }
-    if (selected.id !== read(selectedRunId)) {
-      set(detail, null)
-      set(detailError, null)
-    }
-    set(selectedRunId, selected.id)
-    await loadRun(selected.id, current)
-  } catch (error) {
-    if (current !== generation) return
-    set(listingError, panelError(error))
-    set(detailLoading, false)
-  } finally {
-    if (current === generation) {
-      set(loading, false)
-      set(detailLoading, false)
-    }
-  }
-}
-
-function selectRun(runId: string): void {
-  const current = ++generation
-  set(loading, false)
-  set(selectedRunId, runId)
-  set(detail, null)
-  set(detailError, null)
-  void loadRun(runId, current)
-}
-
-/** Runs once before the first render; requests end with the panel. */
-export function setup(ctx: PanelContext): void {
-  ctx.subscriptions.push(
-    settings.onDidChange(() => {
-      void refresh()
-    })
-  )
-  void refresh()
+function errorTitle(error: { code: string }): string {
+  return ERROR_TITLE[error.code] ?? '读取失败'
 }
 
 function TimeRow({ label, at }: { label: string; at: number | null }) {
@@ -375,7 +265,7 @@ function Overview({ view }: { view: RunView }) {
   const deliveryItems = DELIVERY_FIELDS.map((field) => {
     const count = view.deliveryCounts[field]
     return {
-      label: deliveryFieldLabel(field),
+      label: DELIVERY_LABEL[field],
       value: '是 ' + count.yes + ' · 否 ' + count.no + ' · 未核验 ' + count.unverified
     }
   })
@@ -458,7 +348,7 @@ function Tasks({ view }: { view: RunView }) {
       id: task.id,
       title: task.title,
       status: TASK_STATUS_LABEL[task.status],
-      dependencies: truncate(task.dependencies.join(', ') || '—', 80),
+      dependencies: cleanText(task.dependencies.join(', ') || '—', 80),
       orca: task.orcaTaskId ?? '—',
       note: taskNote(task)
     }
@@ -520,7 +410,7 @@ function Workers({ view }: { view: RunView }) {
       start: START_LABEL[worker.startConfirmation],
       freshness: FRESHNESS_LABEL[worker.freshness],
       worktree: worker.worktree || '未记录',
-      report: truncate(worker.reportedSummary || '—', 120)
+      report: cleanText(worker.reportedSummary || '—', 120)
     }
   }))
   return (
@@ -654,7 +544,7 @@ function Events({ view }: { view: RunView }) {
       type: event.type,
       source: event.source,
       bookkeeping: event.bookkeeping ? '是' : '否',
-      summary: truncate(event.summary || '—', 160)
+      summary: cleanText(event.summary || '—', 160)
     }
   }))
   return (
@@ -763,12 +653,12 @@ function RunHeader({
     <Stack gap="xs">
       <Heading level={3}>{view?.title || summaryLabel(summary) || '未命名运行'}</Heading>
       <Row gap="xs" wrap align="center">
-        <Badge tone={modeTone(mode)}>{MODE_LABEL[mode]}</Badge>
-        <Badge tone={runStatusTone(status)}>{RUN_STATUS_LABEL[status]}</Badge>
-        <Badge tone={healthTone(health)}>健康 {HEALTH_LABEL[health]}</Badge>
+        <Badge tone={MODE_TONE[mode]}>{MODE_LABEL[mode]}</Badge>
+        <Badge tone={RUN_STATUS_TONE[status]}>{RUN_STATUS_LABEL[status]}</Badge>
+        <Badge tone={HEALTH_TONE[health]}>健康 {HEALTH_LABEL[health]}</Badge>
         <Badge tone={freshnessTone(freshness)}>时效 {FRESHNESS_LABEL[freshness]}</Badge>
         {summary && summary.availability !== 'available' ? (
-          <Badge tone={availabilityTone(summary.availability)}>
+          <Badge tone={AVAILABILITY_TONE[summary.availability]}>
             {AVAILABILITY_LABEL[summary.availability]}
           </Badge>
         ) : null}

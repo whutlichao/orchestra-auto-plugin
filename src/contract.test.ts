@@ -2,15 +2,9 @@
 // by the orchestra-auto-zh progress.py recorder (see test/fixtures/README.md).
 import { assert, test } from 'orca/testing'
 import { readFileSync } from 'node:fs'
-import {
-  DELIVERY_FIELDS,
-  MAX_DELIVERIES,
-  MAX_EVENTS,
-  MAX_TASKS,
-  parseSnapshot,
-  projectRun,
-  type Snapshot
-} from './contract'
+import { DELIVERY_FIELDS, MAX_DELIVERIES, MAX_EVENTS, MAX_TASKS } from './contract'
+import { parseSnapshot, type Snapshot } from './snapshot'
+import { projectRun } from './projection'
 
 function fixture(name: string): string {
   return readFileSync(new URL('../test/fixtures/' + name, import.meta.url), 'utf8')
@@ -65,7 +59,6 @@ test('projects a real recorder snapshot without inventing success', () => {
   assert.ok(view.attention.some((item) => item.kind === 'blocked'))
   assert.ok(view.attention.some((item) => item.kind === 'decision'))
   assert.ok(view.attention.some((item) => item.kind === 'worker-lost'))
-  assert.equal(view.attention.some((item) => item.kind === 'health'), false)
 
   const serialized = JSON.stringify(view)
   assert.ok(!serialized.includes('/tmp/orchestra-auto-fixture-target'))

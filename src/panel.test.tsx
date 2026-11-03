@@ -4,7 +4,7 @@ import { afterEach, assert, hostError, mockHost, mount, test, type TestPanel } f
 import * as panel from './panel'
 import {
   sampleListing,
-  sampleSecondView,
+  sampleFinishedView,
   sampleView,
   unconfiguredListing,
   unavailableSummary
@@ -23,7 +23,7 @@ function readyHost() {
     requests: {
       'runs.list': () => sampleListing,
       'run.get': (input: unknown) =>
-        (input as { runId: string }).runId === 'demo-finished' ? sampleSecondView : sampleView
+        (input as { runId: string }).runId === 'demo-finished' ? sampleFinishedView : sampleView
     }
   })
 }
@@ -108,7 +108,7 @@ test('refreshes the listing and selects another run', async () => {
           return sampleListing
         },
         'run.get': (input: unknown) =>
-          (input as { runId: string }).runId === 'demo-finished' ? sampleSecondView : sampleView
+          (input as { runId: string }).runId === 'demo-finished' ? sampleFinishedView : sampleView
       }
     })
   })
