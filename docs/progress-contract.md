@@ -36,7 +36,7 @@ non-object collection, or a non-list `events` marks the snapshot **corrupt**.
 | `mode` | `REAL` or `DEMO`; other values render unknown. DEMO is called out in the panel. |
 | `phase`, `title`, `summary` | Trimmed and length-capped display strings. |
 | `orca_run_id` | Null or portable identifier; invalid non-null values are corrupt. |
-| `started_at`, `updated_at`, `last_observed`, `last_effective_progress`, `ended_at` | ISO timestamps; invalid values render unknown. |
+| `started_at`, `last_observed`, `last_effective_progress`, `ended_at` | ISO timestamps; invalid values render unknown. `updated_at` is not rendered, so it is not projected. |
 
 `last_observed` drives freshness:
 
@@ -58,7 +58,7 @@ Each value is an object; the key is the task ID. Read fields:
 | `dependencies` | Portable IDs, up to 20 rendered. A dependency on an unrecorded task remains just an ID. |
 | `blocked_reason`, `pending_decision` | Display strings; non-empty values create attention items. |
 | `provisional`, `orca_task_id` | A non-boolean `provisional` or an invalid non-null `orca_task_id` is corrupt. |
-| `verified_at` | Timestamp; invalid renders unknown. |
+| `verified_at` | Not read or validated; the panel shows task status, not per-task verification time. |
 
 Task counts are actual counts by recorded status, including `unknown`, plus the
 actual total. There is no completion percentage and no inferred scheduler state.
@@ -75,7 +75,7 @@ Each value is an object; the key is the worker ID. Read fields:
 | `start_confirmation` | `unknown`, `observed`, `unobserved`, or the v1 value `unsupported`; shown separately from lifecycle. |
 | `worktree` | Only the basename is rendered; the full path is discarded. |
 | `reported_summary` | Display string; it is a self-report, not acceptance. |
-| `last_observed`, `verified_at` | Timestamps; `last_observed` drives the worker freshness column. |
+| `last_observed` | Timestamp driving the worker freshness column; invalid renders unknown. `verified_at` is not read or validated. |
 
 Self-reported values never update verified lifecycle, task status or delivery
 facts in this projection.
