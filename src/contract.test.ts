@@ -123,6 +123,23 @@ test('worker self-report stays separate from verified lifecycle and task status'
   )
 })
 
+test('a run-level waiting or failed state is visible even without a task detail', () => {
+  const waiting = parseSnapshot(fixture('real-finished/progress.json'))
+  ;(waiting.run as Record<string, unknown>).status = 'waiting_user'
+  const waitingView = projectRun(waiting, { source: 'registry', now: FIXTURE_NOW })
+  assert.ok(waitingView.attention.some((item) => item.id === 'run-decision'))
+
+  const failed = parseSnapshot(fixture('real-finished/progress.json'))
+  ;(failed.run as Record<string, unknown>).status = 'failed'
+  const failedView = projectRun(failed, { source: 'registry', now: FIXTURE_NOW })
+  assert.ok(failedView.attention.some((item) => item.id === 'run-failed'))
+
+  const detailed = parseSnapshot(fixture('real-active/progress.json'))
+  ;(detailed.run as Record<string, unknown>).status = 'waiting_user'
+  const detailedView = projectRun(detailed, { source: 'audit-root', now: FIXTURE_NOW })
+  assert.equal(detailedView.attention.some((item) => item.id === 'run-decision'), false)
+})
+
 test('missing deliveries are unverified, never successes', () => {
   const snapshot = parseSnapshot(fixture('real-finished/progress.json'))
   snapshot.tasks['t2'] = {

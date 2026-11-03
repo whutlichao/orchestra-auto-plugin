@@ -119,6 +119,8 @@ The panel lists only recorded problem signals:
 - a worker with verified lifecycle `failed` or `lost`
 - a worker whose self-report is `failed` while its verified lifecycle is not
   (marked as unverified self-report)
+- run status `waiting_user` when no task carries a decision, and run status
+  `failed`, matching the reference dashboard's run-level items
 
 Run health is shown separately as a badge and a callout, not in this list.
 Nothing else is inferred. In particular, a stale observation is a separate

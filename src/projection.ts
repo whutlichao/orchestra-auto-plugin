@@ -35,6 +35,7 @@ import {
   type EventView,
   type Freshness,
   type RunSource,
+  type RunStatus,
   type RunView,
   type TaskStatus,
   type TaskView,
@@ -205,8 +206,27 @@ function projectEvents(snapshot: Snapshot): { events: EventView[]; total: number
   return { events: all.slice(0, MAX_EVENTS), total: all.length }
 }
 
-function projectAttention(tasks: TaskView[], workers: WorkerView[]): AttentionItem[] {
+function projectAttention(
+  tasks: TaskView[],
+  workers: WorkerView[],
+  runStatus: RunStatus
+): AttentionItem[] {
   const items: AttentionItem[] = []
+  const hasDecision = tasks.some(
+    (task) => task.status === 'waiting_user' || task.pendingDecision !== ''
+  )
+  // The reference dashboard also raises a run-level item when the Run itself
+  // records the state and no task carries the detail.
+  if (!hasDecision && runStatus === 'waiting_user') {
+    items.push({
+      id: 'run-decision',
+      kind: 'decision',
+      text: '运行已标记等待用户：尚无具体决策记录'
+    })
+  }
+  if (runStatus === 'failed') {
+    items.push({ id: 'run-failed', kind: 'failed', text: '运行状态为失败' })
+  }
   for (const task of tasks) {
     if (task.status === 'blocked' || task.blockedReason !== '') {
       items.push({
@@ -278,7 +298,8 @@ export function projectRun(
   const tasks = projectTasks(snapshot)
   const workers = projectWorkers(snapshot, now, staleMs)
   const delivery = projectDeliveries(snapshot, tasks)
-  const attention = projectAttention(tasks, workers)
+  const runStatus = enumValue(run.status, RUN_STATUSES, 'unknown')
+  const attention = projectAttention(tasks, workers, runStatus)
   const artifacts = projectArtifacts(snapshot)
   const events = projectEvents(snapshot)
 
@@ -292,7 +313,7 @@ export function projectRun(
     title: cleanText(run.title, MAX_TITLE),
     source: options.source,
     schemaVersion: snapshot.schemaVersion,
-    status: enumValue(run.status, RUN_STATUSES, 'unknown'),
+    status: runStatus,
     health: enumValue(run.health, RUN_HEALTH, 'unknown'),
     mode: enumValue(run.mode, RUN_MODES, 'unknown'),
     phase: cleanText(run.phase, 80),
