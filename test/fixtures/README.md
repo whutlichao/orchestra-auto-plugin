@@ -13,19 +13,10 @@ normalized to `/tmp/orchestra-auto-fixture-target`; every other field and the
 formatting come from the recorder. No real audit state, credentials, messages or
 terminal content is stored here.
 
-## Reproduce
+## Provenance
 
-From a checkout of `orchestra-auto`:
-
-```sh
-PROGRESS=/path/to/orchestra-auto/skills/orchestra-auto-zh/scripts/progress.py
-BASE=$(python3 -c 'import os,tempfile; print(os.path.realpath(tempfile.mkdtemp(prefix="orca-plugin-fixtures-")))')
-mkdir -p "$BASE/target"
-python3 "$PROGRESS" --state "$BASE/state-active" --json init --event-id init-1 --effective \
-  --data "{\"id\":\"fixture-active\",\"target_repo\":\"$BASE/target\",\"mode\":\"REAL\",\"phase\":\"implementation\",\"status\":\"active\",\"title\":\"Fixture: active run\"}"
-# ... task/worker/event/delivery/artifact calls as recorded in src/contract.test.ts
-cp "$BASE/state-active/progress.json" test/fixtures/real-active/progress.json
-```
-
-Use a state directory outside every repository. The tests read these files at
-runtime with `orca plugin test .`.
+The fixtures were generated on 2026-11-03 with the recorder's protocol-v2 write
+commands (init, task, worker, event, delivery, artifact and end), using
+fabricated data and a temporary target/state directory outside every repository.
+The committed files are the source the tests read; no generation step runs in
+the test suite.

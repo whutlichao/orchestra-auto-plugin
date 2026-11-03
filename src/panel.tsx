@@ -34,7 +34,6 @@ import {
   STALE_SECONDS,
   type ArtifactView,
   type DeliveryField,
-  type DeliveryView,
   type EventView,
   type Freshness,
   type RunAvailability,
@@ -219,19 +218,6 @@ function taskTone(status: TaskStatus): Tone {
   return 'neutral'
 }
 
-function lifecycleTone(lifecycle: WorkerLifecycle): Tone {
-  if (lifecycle === 'failed' || lifecycle === 'lost') return 'danger'
-  if (lifecycle === 'running') return 'accent'
-  if (lifecycle === 'waiting_user') return 'warning'
-  return 'neutral'
-}
-
-function startTone(start: StartConfirmation): Tone {
-  if (start === 'observed') return 'accent'
-  if (start === 'unobserved') return 'warning'
-  return 'neutral'
-}
-
 function availabilityTone(availability: RunAvailability): Tone {
   if (availability === 'corrupt') return 'danger'
   if (availability === 'unavailable') return 'warning'
@@ -268,13 +254,6 @@ function errorTitle(error: PanelError): string {
   if (error.code === 'run_not_found') return '运行不存在'
   if (error.code === 'timeout') return '读取超时'
   return '读取失败'
-}
-
-function deliveryValue(delivery: DeliveryView, field: DeliveryField): boolean | null {
-  if (field === 'implemented') return delivery.implemented
-  if (field === 'integrated') return delivery.integrated
-  if (field === 'merged') return delivery.merged
-  return delivery.trackerClosed
 }
 
 function deliveryFieldLabel(field: DeliveryField): string {

@@ -56,8 +56,9 @@ Discovery uses two sources:
    otherwise each direct child directory containing `progress.json` is a run.
    The scan is one level deep, not recursive.
 
-The registry is optional. A run registered in `~/.orca/progress` but whose state
-is outside every configured audit root appears as unavailable and is never read.
+The registry is optional. When discovery is configured, a run registered in
+`~/.orca/progress` but whose state is outside every configured audit root appears
+as unavailable and is never read.
 
 Audit roots should be real paths, not symlinks, and outside Git repositories for
 real audit data. The repository's `samples/audit-root` is an intentional

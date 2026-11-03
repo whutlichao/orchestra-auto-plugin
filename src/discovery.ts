@@ -182,6 +182,9 @@ function resolveRoot(raw: string): string {
   try {
     assertNoSymlinkComponents(path)
     const real = realpathSync(path)
+    // Re-check after resolution: a component swapped in between must not turn
+    // the configured root into a link to somewhere else.
+    assertNoSymlinkComponents(path)
     if (real === parsePath(real).root || real === resolve(homedir())) {
       throw new SafetyError('invalid_path', '审计目录不能是文件系统根目录或用户主目录')
     }
