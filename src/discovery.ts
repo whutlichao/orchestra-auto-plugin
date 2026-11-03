@@ -25,7 +25,9 @@ import { isAbsolute, join, parse as parsePath, relative, resolve, sep } from 'no
 import {
   MAX_SNAPSHOT_BYTES,
   PROBLEM_TEXT,
+  RUN_LABEL_MAX_CHARS,
   SnapshotError,
+  cleanText,
   isPortableId,
   isRecord,
   labelFor,
@@ -114,6 +116,14 @@ function fsCode(error: unknown): string {
   return isRecord(error) && typeof error.code === 'string' ? error.code : ''
 }
 
+function problemCode(
+  error: unknown,
+  fallback: RunProblemCode = 'unreadable'
+): RunProblemCode {
+  if (error instanceof SafetyError || error instanceof SnapshotError) return error.code
+  return fallback
+}
+
 function readError(error: unknown): SafetyError {
   const code = fsCode(error)
   if (code === 'ENOENT') return new SafetyError('missing', 'file is missing')
@@ -172,11 +182,11 @@ function resolveRoot(raw: string): string {
   try {
     assertNoSymlinkComponents(path)
     const real = realpathSync(path)
+    if (real === parsePath(real).root || real === resolve(homedir())) {
+      throw new SafetyError('invalid_path', '审计目录不能是文件系统根目录或用户主目录')
+    }
     const stat = statSync(real)
     if (!stat.isDirectory()) throw new SafetyError('invalid_path', '审计目录不是目录')
-    if (!isInside(path, real) && path !== real) {
-      throw new SafetyError('symlink', '审计目录解析后越过了配置的路径')
-    }
     return real
   } catch (error) {
     if (error instanceof SafetyError) {
@@ -275,6 +285,18 @@ function readTextFile(path: string, maxBytes: number): string {
 }
 
 function readDescriptor(path: string, stem: string): Descriptor {
+  let stat
+  try {
+    stat = lstatSync(path)
+  } catch (error) {
+    throw new SafetyError('invalid_descriptor', 'descriptor is not readable')
+  }
+  if (stat.isSymbolicLink()) {
+    throw new SafetyError('symlink', 'descriptor is a symbolic link')
+  }
+  if (!stat.isFile()) {
+    throw new SafetyError('invalid_descriptor', 'descriptor is not a regular file')
+  }
   let raw: string
   try {
     raw = readTextFile(path, MAX_DESCRIPTOR_BYTES)
@@ -299,8 +321,9 @@ function readDescriptor(path: string, stem: string): Descriptor {
   if (!isPortableId(parsed.run_id) || parsed.run_id !== stem) {
     throw new SafetyError('invalid_descriptor', 'descriptor run_id does not match its file name')
   }
-  if (parsed.label !== undefined && typeof parsed.label !== 'string') {
-    throw new SafetyError('invalid_descriptor', 'descriptor label is not a string')
+  if (parsed.label !== undefined &&
+      (typeof parsed.label !== 'string' || parsed.label.length > 4096)) {
+    throw new SafetyError('invalid_descriptor', 'descriptor label is invalid')
   }
   if (parsed.registered_at !== undefined &&
       (typeof parsed.registered_at !== 'string' || parsed.registered_at === '')) {
@@ -327,6 +350,10 @@ function probeProgress(dir: string): 'file' | 'symlink' | 'other' | 'missing' | 
   }
 }
 
+function safeLabel(value: string, fallback: string): string {
+  return cleanText(value, RUN_LABEL_MAX_CHARS) || fallback
+}
+
 function summaryFor(
   id: string,
   label: string,
@@ -337,7 +364,7 @@ function summaryFor(
 ): RunSummary {
   return {
     id,
-    label,
+    label: safeLabel(label, id),
     source,
     availability,
     problem,
@@ -452,12 +479,7 @@ function addRun(
     if (error instanceof BudgetExceeded) throw error
     const fallbackId = idHint ?? ''
     if (!fallbackId) throw error
-    const problem = error instanceof SafetyError
-      ? error.code
-      : error instanceof SnapshotError
-        ? error.code
-        : 'unreadable'
-    addUnavailable(entries, fallbackId, labelHint, source, problem, ctx, override)
+    addUnavailable(entries, fallbackId, labelHint, source, problemCode(error), ctx, override)
     return
   }
   const id = idHint ?? view.id
@@ -490,10 +512,7 @@ function scanRoot(
         addRun(entries, root, 'audit-root', '', null, ctx, false)
       } catch (error) {
         if (error instanceof BudgetExceeded) return
-        const problem = error instanceof SafetyError || error instanceof SnapshotError
-          ? error.code
-          : 'unreadable'
-        addUnavailable(entries, name, name, 'audit-root', problem, ctx, false)
+        addUnavailable(entries, name, name, 'audit-root', problemCode(error), ctx, false)
       }
     } else {
       addUnavailable(
@@ -517,6 +536,7 @@ function scanRoot(
   }
   dirents.sort((a, b) => a.name.localeCompare(b.name))
   let scanned = 0
+  let symlinks = 0
   for (const dirent of dirents) {
     if (scanned >= MAX_SCAN_DIRS) {
       ctx.truncated = true
@@ -525,7 +545,11 @@ function scanRoot(
     }
     scanned += 1
     if (dirent.name.startsWith('.')) continue
-    if (dirent.isSymbolicLink() || !dirent.isDirectory()) continue
+    if (dirent.isSymbolicLink()) {
+      symlinks += 1
+      continue
+    }
+    if (!dirent.isDirectory()) continue
     const child = join(root, dirent.name)
     const probe = probeProgress(child)
     if (probe === 'missing') continue
@@ -534,10 +558,7 @@ function scanRoot(
         addRun(entries, child, 'audit-root', '', null, ctx, false)
       } catch (error) {
         if (error instanceof BudgetExceeded) return
-        const problem = error instanceof SafetyError || error instanceof SnapshotError
-          ? error.code
-          : 'unreadable'
-        addUnavailable(entries, dirent.name, dirent.name, 'audit-root', problem, ctx, false)
+        addUnavailable(entries, dirent.name, dirent.name, 'audit-root', problemCode(error), ctx, false)
       }
       continue
     }
@@ -550,6 +571,9 @@ function scanRoot(
       ctx,
       false
     )
+  }
+  if (symlinks > 0) {
+    ctx.warnings.push('审计目录中有符号链接条目，已跳过')
   }
 }
 
@@ -606,10 +630,7 @@ function collectRegistry(
       addRun(entries, stateDir, 'registry', descriptor.label, descriptor.id, ctx, true)
     } catch (error) {
       if (error instanceof BudgetExceeded) return
-      const problem = error instanceof SafetyError || error instanceof SnapshotError
-        ? error.code
-        : 'invalid_descriptor'
-      addUnavailable(entries, stem, stem, 'registry', problem, ctx, true)
+      addUnavailable(entries, stem, stem, 'registry', problemCode(error, 'invalid_descriptor'), ctx, true)
     }
   }
 }

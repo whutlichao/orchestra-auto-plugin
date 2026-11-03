@@ -103,7 +103,12 @@ export const PROBLEM_TEXT: Record<RunProblemCode, string> = {
 }
 
 export const STALE_SECONDS = 300
+export const RUN_LABEL_MAX_CHARS = 120
 export const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
+export const MAX_TASKS = 500
+export const MAX_WORKERS = 500
+export const MAX_DELIVERIES = 500
+export const MAX_ATTENTION = 100
 export const MAX_EVENTS = 20
 export const MAX_ARTIFACTS = 100
 export const MAX_TEXT = 300
@@ -196,7 +201,7 @@ export type EventView = {
 
 export type AttentionItem = {
   id: string
-  kind: 'blocked' | 'decision' | 'failed' | 'rejected' | 'worker-failed' | 'worker-lost' | 'health'
+  kind: 'blocked' | 'decision' | 'failed' | 'rejected' | 'worker-failed' | 'worker-lost'
   text: string
 }
 
@@ -220,7 +225,9 @@ export type RunView = {
   tasks: TaskView[]
   taskCounts: Record<TaskStatus, number> & { total: number }
   workers: WorkerView[]
+  workerTotal: number
   deliveries: DeliveryView[]
+  deliveryTotal: number
   deliveryCounts: Record<DeliveryField, DeliveryCount>
   deliveryMissingTasks: number
   artifacts: ArtifactView[]
@@ -228,6 +235,7 @@ export type RunView = {
   events: EventView[]
   eventTotal: number
   attention: AttentionItem[]
+  attentionTotal: number
   warnings: string[]
 }
 
@@ -275,10 +283,17 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], fall
     : fallback
 }
 
-function text(value: unknown, max: number): string {
+export function cleanText(value: unknown, max: number): string {
   if (typeof value !== 'string') return ''
-  const clean = value.replace(/\s+/g, ' ').trim()
+  const clean = value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
   return clean.length > max ? clean.slice(0, max - 1) + '…' : clean
+}
+
+function text(value: unknown, max: number): string {
+  return cleanText(value, max)
 }
 
 function portableOrNull(value: unknown): string | null {
@@ -559,8 +574,7 @@ function projectEvents(snapshot: Snapshot): { events: EventView[]; total: number
 
 function projectAttention(
   tasks: TaskView[],
-  workers: WorkerView[],
-  health: RunHealth
+  workers: WorkerView[]
 ): AttentionItem[] {
   const items: AttentionItem[] = []
   for (const task of tasks) {
@@ -600,10 +614,7 @@ function projectAttention(
       })
     }
   }
-  if (health === 'degraded' || health === 'blocked' || health === 'lost') {
-    items.push({ id: 'run-health', kind: 'health', text: '运行健康：' + health })
-  }
-  return items.slice(0, 30)
+  return items
 }
 
 /**
@@ -621,9 +632,10 @@ export function projectRun(
   const staleMs = (options.staleSeconds ?? STALE_SECONDS) * 1000
   const run = snapshot.run
   const lastObservedAt = timestamp(run.last_observed)
-  const tasks = projectTasks(snapshot)
-  const workers = projectWorkers(snapshot, now, staleMs)
-  const delivery = projectDeliveries(snapshot, tasks)
+  const allTasks = projectTasks(snapshot)
+  const allWorkers = projectWorkers(snapshot, now, staleMs)
+  const delivery = projectDeliveries(snapshot, allTasks)
+  const attention = projectAttention(allTasks, allWorkers)
   const artifacts = projectArtifacts(snapshot)
   const events = projectEvents(snapshot)
   const health = enumValue(run.health, RUN_HEALTH, 'unknown')
@@ -641,9 +653,9 @@ export function projectRun(
     failed: 0,
     paused: 0,
     cancelled: 0,
-    total: tasks.length
+    total: allTasks.length
   }
-  for (const task of tasks) taskCounts[task.status] += 1
+  for (const task of allTasks) taskCounts[task.status] += 1
 
   const warnings = [...snapshot.warnings]
   if (delivery.duplicateDeliveries > 0) {
@@ -667,17 +679,20 @@ export function projectRun(
     lastEffectiveProgressAt: timestamp(run.last_effective_progress),
     endedAt: timestamp(run.ended_at),
     freshness: freshness(lastObservedAt, now, staleMs),
-    tasks,
+    tasks: allTasks.slice(0, MAX_TASKS),
     taskCounts,
-    workers,
-    deliveries: delivery.deliveries,
+    workers: allWorkers.slice(0, MAX_WORKERS),
+    workerTotal: allWorkers.length,
+    deliveries: delivery.deliveries.slice(0, MAX_DELIVERIES),
+    deliveryTotal: delivery.deliveries.length,
     deliveryCounts: delivery.counts,
     deliveryMissingTasks: delivery.missingTasks,
     artifacts: artifacts.artifacts,
     artifactTotal: artifacts.total,
     events: events.events,
     eventTotal: events.total,
-    attention: projectAttention(tasks, workers, health),
+    attention: attention.slice(0, MAX_ATTENTION),
+    attentionTotal: attention.length,
     warnings
   }
 }

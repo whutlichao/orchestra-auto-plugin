@@ -4,7 +4,9 @@ import { assert, test } from 'orca/testing'
 import { readFileSync } from 'node:fs'
 import {
   DELIVERY_FIELDS,
+  MAX_DELIVERIES,
   MAX_EVENTS,
+  MAX_TASKS,
   parseSnapshot,
   projectRun,
   type Snapshot
@@ -33,6 +35,9 @@ test('projects a real recorder snapshot without inventing success', () => {
   assert.equal(view.taskCounts.waiting_user, 1)
   assert.equal(view.taskCounts.pending, 1)
   assert.equal(view.workers.length, 3)
+  assert.equal(view.workerTotal, 3)
+  assert.equal(view.deliveryTotal, 5)
+  assert.equal(view.attentionTotal, 3)
 
   const plan = view.deliveries.find((item) => item.taskId === 't-plan')
   assert.ok(plan)
@@ -77,9 +82,30 @@ test('a finished snapshot is not the same as verified deliveries', () => {
   })
   assert.equal(view.status, 'completed')
   assert.equal(view.health, 'unknown')
+  assert.equal(view.workerTotal, 1)
+  assert.equal(view.deliveryTotal, 1)
+  assert.equal(view.attentionTotal, 0)
   assert.equal(view.deliveryCounts.implemented.yes, 1)
   assert.equal(view.deliveryCounts.merged.yes, 1)
   assert.equal(view.deliveryCounts.tracker_closed.yes, 1)
+})
+
+test('view arrays are bounded while the counts stay complete', () => {
+  const snapshot = parseSnapshot(fixture('real-finished/progress.json'))
+  for (let index = 0; index < 600; index += 1) {
+    snapshot.tasks['bulk-' + index] = {
+      id: 'bulk-' + index,
+      title: 'Bulk task ' + index,
+      status: 'pending'
+    }
+  }
+  const view = projectRun(snapshot, { source: 'registry', now: FIXTURE_NOW })
+  assert.equal(view.tasks.length, MAX_TASKS)
+  assert.equal(view.taskCounts.total, 601)
+  assert.equal(view.deliveries.length, MAX_DELIVERIES)
+  assert.equal(view.deliveryTotal, 601)
+  assert.equal(view.workerTotal, 1)
+  assert.equal(view.attentionTotal, 0)
 })
 
 test('worker self-report stays separate from verified lifecycle and task status', () => {

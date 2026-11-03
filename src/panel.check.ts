@@ -5,6 +5,7 @@ import { defineCheck, hostError } from 'orca/testing'
 import {
   corruptSummary,
   emptyListing,
+  finishedSummary,
   sampleListing,
   sampleSecondView,
   sampleView,
@@ -31,7 +32,7 @@ export default defineCheck({
   },
   finished: {
     requests: {
-      'runs.list': () => sampleListing,
+      'runs.list': () => ({ ...sampleListing, runs: [finishedSummary], warnings: [] }),
       'run.get': () => sampleSecondView
     }
   },

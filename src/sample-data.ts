@@ -93,6 +93,7 @@ export const sampleView: RunView = {
     cancelled: 0,
     total: 6
   },
+  workerTotal: 5,
   workers: [
     worker('w-plan-a1', 't-plan', {
       lifecycle: 'closed',
@@ -117,6 +118,7 @@ export const sampleView: RunView = {
       freshness: 'stale'
     })
   ],
+  deliveryTotal: 6,
   deliveries: [
     {
       taskId: 't-api',
@@ -229,9 +231,9 @@ export const sampleView: RunView = {
     { id: 'task-decision:t-docs', kind: 'decision', text: '安装与使用文档：是否同时发布到 Git 安装源？' },
     { id: 'task-rejected:t-old', kind: 'rejected', text: '旧方案：直读注册表二进制：已打回' },
     { id: 'worker-lost:w-api-a1', kind: 'worker-lost', text: 'w-api-a1：Worker 失联' },
-    { id: 'worker-failed:w-old-a1', kind: 'worker-failed', text: 'w-old-a1：Worker 失败' },
-    { id: 'run-health', kind: 'health', text: '运行健康：degraded' }
+    { id: 'worker-failed:w-old-a1', kind: 'worker-failed', text: 'w-old-a1：Worker 失败' }
   ],
+  attentionTotal: 5,
   warnings: ['示例数据仅用于界面演示']
 }
 
@@ -262,6 +264,7 @@ export const sampleSecondView: RunView = {
     pendingDecision: ''
   })),
   attention: [],
+  attentionTotal: 0,
   warnings: []
 }
 
@@ -280,7 +283,7 @@ const activeSummary: RunSummary = {
   taskCount: sampleView.taskCounts.total
 }
 
-const finishedSummary: RunSummary = {
+export const finishedSummary: RunSummary = {
   id: sampleSecondView.id,
   label: sampleSecondView.title,
   source: 'audit-root' as const,

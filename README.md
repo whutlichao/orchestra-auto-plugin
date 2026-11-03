@@ -111,8 +111,10 @@ The worker enforces these before reading a file:
 - No external assets, URLs or network calls are loaded.
 
 Limits: 8 MiB per snapshot, 64 MiB per discovery pass, 16 audit roots, 200
-registry descriptors, 1000 directory entries per root, 200 runs, 100 rows per
-table, 30 attention items, and 20 events. Truncation is shown in the panel.
+registry descriptors, 1000 directory entries per root, 200 runs, 500 projected
+tasks/workers/deliveries, 100 rows per table, 100 projected attention records
+(20 rendered), and 20 events. Counts remain complete, and truncation is shown
+with the true total.
 
 ## Development
 

@@ -409,7 +409,6 @@ function Overview({ view }: { view: RunView }) {
         </Callout>
       ) : null}
       <KeyValue items={overviewItems} />
-      {view.title ? <Text weight="medium">{view.title}</Text> : null}
       {view.summary ? <Text size="sm">{view.summary}</Text> : null}
       <Stack gap="xs">
         <TimeRow label="最近观测" at={view.lastObservedAt} />
@@ -447,9 +446,9 @@ function Overview({ view }: { view: RunView }) {
               • {item.text}
             </Text>
           ))}
-          {view.attention.length > ATTENTION_LIMIT ? (
+          {view.attentionTotal > ATTENTION_LIMIT ? (
             <Text muted size="xs">
-              还有 {view.attention.length - ATTENTION_LIMIT} 项未显示。
+              还有 {view.attentionTotal - ATTENTION_LIMIT} 项未显示。
             </Text>
           ) : null}
         </Stack>
@@ -486,6 +485,7 @@ function Tasks({ view }: { view: RunView }) {
       title: task.title,
       status: TASK_STATUS_LABEL[task.status],
       dependencies: truncate(task.dependencies.join(', ') || '—', 80),
+      orca: task.orcaTaskId ?? '—',
       note: taskNote(task)
     }
   }))
@@ -512,15 +512,16 @@ function Tasks({ view }: { view: RunView }) {
             { key: 'title', label: '标题', width: 'auto' },
             { key: 'status', label: '状态', width: 'sm' },
             { key: 'dependencies', label: '依赖', width: 'md', hideBelow: 'md' },
+            { key: 'orca', label: 'Orca Task', width: 'md', hideBelow: 'md' },
             { key: 'note', label: '备注', width: 'lg', hideBelow: 'md' }
           ]}
           rows={rows}
           emptyText="没有任务记录"
         />
       )}
-      {view.tasks.length > TASK_LIMIT ? (
+      {view.taskCounts.total > TASK_LIMIT ? (
         <Text muted size="xs">
-          仅显示前 {TASK_LIMIT} 个任务，共 {view.tasks.length} 个。
+          仅显示前 {TASK_LIMIT} 个任务，共 {view.taskCounts.total} 个。
         </Text>
       ) : null}
       <Text muted size="xs">
@@ -537,6 +538,8 @@ function Workers({ view }: { view: RunView }) {
     cells: {
       worker: worker.id,
       task: worker.taskId ?? '未知',
+      dispatch: worker.dispatchId ?? '—',
+      parent: worker.parentWorkerId ?? '—',
       attempt: worker.attempt ?? '未知',
       lifecycle: LIFECYCLE_LABEL[worker.lifecycle],
       reported: LIFECYCLE_LABEL[worker.reportedLifecycle],
@@ -556,6 +559,8 @@ function Workers({ view }: { view: RunView }) {
           columns={[
             { key: 'worker', label: 'Worker', width: 'md' },
             { key: 'task', label: '任务', width: 'md' },
+            { key: 'dispatch', label: 'Dispatch', width: 'md', hideBelow: 'md' },
+            { key: 'parent', label: '父 Worker', width: 'md', hideBelow: 'md' },
             { key: 'attempt', label: '次数', width: 'xs', align: 'end', hideBelow: 'md' },
             { key: 'lifecycle', label: '核验生命周期', width: 'sm' },
             { key: 'reported', label: '自报生命周期', width: 'sm', hideBelow: 'sm' },
@@ -568,9 +573,9 @@ function Workers({ view }: { view: RunView }) {
           emptyText="没有 Worker 记录"
         />
       )}
-      {view.workers.length > WORKER_LIMIT ? (
+      {view.workerTotal > WORKER_LIMIT ? (
         <Text muted size="xs">
-          仅显示前 {WORKER_LIMIT} 个 Worker，共 {view.workers.length} 个。
+          仅显示前 {WORKER_LIMIT} 个 Worker，共 {view.workerTotal} 个。
         </Text>
       ) : null}
       <Text muted size="xs">
@@ -615,9 +620,9 @@ function DeliveryTable({ view }: { view: RunView }) {
           emptyText="没有交付记录"
         />
       )}
-      {view.deliveries.length > DELIVERY_LIMIT ? (
+      {view.deliveryTotal > DELIVERY_LIMIT ? (
         <Text muted size="xs">
-          仅显示前 {DELIVERY_LIMIT} 条交付记录，共 {view.deliveries.length} 条。
+          仅显示前 {DELIVERY_LIMIT} 条交付记录，共 {view.deliveryTotal} 条。
         </Text>
       ) : null}
       <Text muted size="xs">

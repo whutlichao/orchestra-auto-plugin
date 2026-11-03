@@ -23,11 +23,19 @@ async function readSettings(orca: OrcaWorkerApi): Promise<DiscoverySettings> {
   }
 }
 
+// Log only a code or class name: a raw message could name a local path.
+function errorKind(error: unknown): string {
+  if (isRecord(error) && typeof error.code === 'string') return error.code
+  if (error instanceof Error) return error.name
+  return 'unknown'
+}
+
 export default function activate(orca: OrcaWorkerApi): void {
   orca.panels.handle('runs.list', async () => {
     try {
       return discoverRuns(await readSettings(orca)).listing
-    } catch {
+    } catch (error) {
+      orca.log('runs.list failed: ' + errorKind(error))
       throw new RequestError('read_failed', '读取运行列表失败')
     }
   })
@@ -44,6 +52,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       return lookup.view
     } catch (error) {
       if (error instanceof RequestError) throw error
+      orca.log('run.get failed: ' + errorKind(error))
       throw new RequestError('read_failed', '读取运行快照失败')
     }
   })

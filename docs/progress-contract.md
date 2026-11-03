@@ -30,7 +30,7 @@ non-object collection, or a non-list `events` marks the snapshot **corrupt**.
 | Field | Rule |
 | --- | --- |
 | `id` | Required portable identifier. |
-| `target_repo` | Required non-empty string for structural validation; **never rendered**. |
+| `target_repo` | Required non-empty string for structural validation; **never rendered or followed**. The recorder's write-side existence/separation guard is deliberately not repeated: following that path would leave the configured audit roots. |
 | `status` | One of `unknown`, `active`, `waiting_user`, `failed`, `paused`, `completed`, `cancelled`; other values render as unknown. |
 | `health` | One of `healthy`, `degraded`, `blocked`, `lost`, `unknown`; a present invalid value is corrupt. Missing renders unknown. |
 | `mode` | `REAL` or `DEMO`; other values render unknown. DEMO is called out in the panel. |
@@ -119,8 +119,8 @@ The panel lists only recorded problem signals:
 - a worker with verified lifecycle `failed` or `lost`
 - a worker whose self-report is `failed` while its verified lifecycle is not
   (marked as unverified self-report)
-- run health `degraded`, `blocked` or `lost`
 
+Run health is shown separately as a badge and a callout, not in this list.
 Nothing else is inferred. In particular, a stale observation is a separate
 warning, not an attention item or a failure.
 
@@ -149,11 +149,18 @@ the worker resolves it against its own discovery result.
 | registry descriptors | 200 |
 | directory entries scanned per root | 1000 |
 | runs listed | 200 |
+| task/worker/delivery view arrays | 500 each |
 | task/worker/delivery rows rendered | 100 each |
-| artifacts rendered | 50 |
-| attention items | 30 |
-| events rendered | 20 |
+| attention records projected | 100 |
+| attention items rendered | 20 |
+| artifacts projected / rendered | 100 / 50 |
+| events projected / rendered | 20 / 20 |
 | stale threshold | 300 s |
+
+The projected arrays are capped so a single worker answer stays below the host's
+1 MiB response limit. Counts (`taskCounts.total`, `workerTotal`,
+`deliveryTotal`, `attentionTotal`, `artifactTotal`, `eventTotal`) always reflect
+the whole snapshot, and the panel states the true total when it truncates rows.
 
 Hitting a limit sets a visible truncation or warning; it never silently claims
 full coverage.

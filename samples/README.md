@@ -1,9 +1,10 @@
 # Sample audit root
 
-This directory is a self-contained, fabricated demo. It was generated with the
-real orchestra-auto-zh `progress.py` recorder in `DEMO` mode; no real run data is
-included. The `target_repo` fields were normalized to
-`/tmp/orchestra-auto-demo-target` after generation.
+This directory is a self-contained, fabricated demo. The two runnable snapshots
+were generated with the real orchestra-auto-zh `progress.py` recorder in `DEMO`
+mode; `demo-corrupt` is deliberately invalid JSON. No real run data is included.
+The `target_repo` fields were normalized to `/tmp/orchestra-auto-demo-target`
+after generation.
 
 | Directory | What it shows |
 | --- | --- |

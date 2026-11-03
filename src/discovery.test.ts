@@ -176,6 +176,10 @@ test('merges the registry and audit roots, and refuses every escape', () => {
   assert.equal(lookupAbsolute.ok, false)
   if (!lookupAbsolute.ok) assert.equal(lookupAbsolute.code, 'invalid_run_id')
 
+  assert.ok(
+    listing.warnings.some((warning) => warning.includes('符号链接'))
+  )
+
   const serialized = JSON.stringify(listing)
   assert.equal(serialized.includes(root), false)
   assert.equal(serialized.includes(audit), false)
@@ -257,6 +261,33 @@ test('duplicate scan IDs keep one entry and warn', () => {
   assert.ok(
     result.listing.warnings.some((warning) => warning.includes('重复 Run ID'))
   )
+})
+
+test('descriptor labels are bounded and oversized labels are refused', () => {
+  const root = base()
+  const audit = join(root, 'audit')
+  const registry = join(root, 'registry')
+  writeRun(join(audit, 'run-a'))
+  writeDescriptor(registry, 'fixture-active.json', {
+    run_id: 'fixture-active',
+    state_path: join(audit, 'run-a'),
+    label: 'x'.repeat(300)
+  })
+  const first = discoverRuns({ auditRoots: audit, registryHome: registry })
+  const summary = first.listing.runs.find((run) => run.id === 'fixture-active')
+  assert.ok(summary)
+  assert.ok(summary.label.length <= 120)
+  assert.ok(summary.label.endsWith('…'))
+
+  writeDescriptor(registry, 'long.json', {
+    run_id: 'long',
+    state_path: join(audit, 'run-a'),
+    label: 'y'.repeat(5000)
+  })
+  const second = discoverRuns({ auditRoots: audit, registryHome: registry })
+  const refused = second.listing.runs.find((run) => run.id === 'long')
+  assert.ok(refused)
+  assert.equal(refused.problem, 'invalid_descriptor')
 })
 
 test('a registry ID that differs from the state run.id is visible as a warning', () => {
