@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Callout,
+  Collapsible,
   EmptyState,
   Heading,
   IconButton,
@@ -371,15 +372,13 @@ function Overview({ view }: { view: RunView }) {
     { label: 'Schema', value: 'v' + view.schemaVersion },
     { label: '来源', value: SOURCE_LABEL[view.source] }
   ]
-  const deliveryRows = DELIVERY_FIELDS.map((field) => ({
-    key: field,
-    cells: {
-      fact: deliveryFieldLabel(field),
-      yes: view.deliveryCounts[field].yes,
-      no: view.deliveryCounts[field].no,
-      unverified: view.deliveryCounts[field].unverified
+  const deliveryItems = DELIVERY_FIELDS.map((field) => {
+    const count = view.deliveryCounts[field]
+    return {
+      label: deliveryFieldLabel(field),
+      value: '是 ' + count.yes + ' · 否 ' + count.no + ' · 未核验 ' + count.unverified
     }
-  }))
+  })
   return (
     <Stack gap="md">
       {view.mode === 'DEMO' ? (
@@ -434,23 +433,19 @@ function Overview({ view }: { view: RunView }) {
       )}
       <Separator />
       <Heading level={3}>交付事实</Heading>
-      <Table
-        label="交付统计"
-        columns={[
-          { key: 'fact', label: '事实', width: 'auto' },
-          { key: 'yes', label: '是', width: 'sm', align: 'end' },
-          { key: 'no', label: '否', width: 'sm', align: 'end' },
-          { key: 'unverified', label: '未核验', width: 'sm', align: 'end' }
-        ]}
-        rows={deliveryRows}
-        emptyText="没有交付记录"
-      />
+      <KeyValue items={deliveryItems} />
       <Text muted size="xs">
         只有严格 true/false 才是已核验；null 或缺失为未核验。没有 delivery 不代表成功。
       </Text>
       <Text muted size="xs">
         未记录交付的任务：{view.deliveryMissingTasks}（不等于成功）。
       </Text>
+      <Collapsible
+        title="最近事件"
+        description={'共 ' + view.eventTotal + ' 条，显示最近 ' + view.events.length + ' 条'}
+      >
+        <Events view={view} />
+      </Collapsible>
     </Stack>
   )
 }
@@ -588,7 +583,7 @@ function DeliveryTable({ view }: { view: RunView }) {
         <Table
           label="交付"
           columns={[
-            { key: 'task', label: '任务', width: 'auto' },
+            { key: 'task', label: '任务', width: 'auto', minWidth: 'md' },
             { key: 'implemented', label: '已实施', width: 'sm' },
             { key: 'integrated', label: '已集成', width: 'sm', hideBelow: 'sm' },
             { key: 'merged', label: '已合并', width: 'sm' },
@@ -689,31 +684,28 @@ function Events({ view }: { view: RunView }) {
 
 function Detail({ view }: { view: RunView }) {
   const rawTab = read(selectedTab)
-  const activeTab = ['overview', 'tasks', 'workers', 'deliveries', 'events'].includes(rawTab)
+  const activeTab = ['overview', 'tasks', 'workers', 'deliveries'].includes(rawTab)
     ? rawTab
     : 'overview'
   return (
     <Stack gap="md">
       <Tabs label="运行详情" value={activeTab} onChange={(value) => set(selectedTab, value)}>
-        <Tab value="overview" label="概览" icon="gauge">
+        <Tab value="overview" label="概览">
           <Overview view={view} />
         </Tab>
-        <Tab value="tasks" label="任务" icon="file-text">
+        <Tab value="tasks" label="任务">
           <Tasks view={view} />
         </Tab>
-        <Tab value="workers" label="Worker" icon="agent">
+        <Tab value="workers" label="Worker">
           <Workers view={view} />
         </Tab>
-        <Tab value="deliveries" label="交付" icon="package">
+        <Tab value="deliveries" label="交付">
           <Stack gap="md">
             <DeliveryTable view={view} />
             <Separator />
             <Heading level={3}>产物</Heading>
             <Artifacts view={view} />
           </Stack>
-        </Tab>
-        <Tab value="events" label="事件" icon="activity">
-          <Events view={view} />
         </Tab>
       </Tabs>
     </Stack>

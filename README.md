@@ -129,6 +129,15 @@ The tests use snapshots produced by the real orchestra-auto recorder; see
 [`test/fixtures/README.md`](test/fixtures/README.md). The projection rules are
 documented in [`docs/progress-contract.md`](docs/progress-contract.md).
 
+## UI evidence
+
+[`docs/evidence/`](docs/evidence/README.md) contains four Orca-rendered
+screenshots of the isolated DEMO scenarios (ready, switched/finished,
+unavailable, corrupt) and the captured `UI_EVIDENCE` output from the real
+components-panel runtime test that switches runs and presses refresh. The
+capture commands, the reversible window minimize/restore, and the still-frame
+limits are documented there.
+
 Known limitation on the tested Orca 1.4.247 macOS bundle: `orca plugin types .`
 fails because the app bundle does not contain
 `resources/plugins/{declarative,types}/*.d.ts`, so `npx tsc -p .` cannot run.
