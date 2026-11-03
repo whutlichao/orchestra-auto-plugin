@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 2,
+  "id": "orchestra-auto",
+  "name": "orchestra-auto",
+  "version": "0.1.0",
+  "description": "Read-only observatory for orchestra-auto runs: status, tasks, workers and deliveries.",
+  "repository": "https://github.com/whutlichao/orchestra-auto-plugin",
+  "author": {
+    "name": "whutlichao"
+  },
+  "engines": {
+    "orca": ">=1.4.247"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "progress",
+        "title": "orchestra-auto",
+        "icon": "activity",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "settings": [
+      {
+        "key": "auditRoots",
+        "title": "本地审计目录",
+        "description": "每行一个绝对路径。只能读取这些目录下的 progress.json；建议使用仓库外目录，且路径中不要有符号链接。留空则不读取任何运行。",
+        "type": "string",
+        "default": "",
+        "multiline": true,
+        "placeholder": "/absolute/path/to/audit/root"
+      },
+      {
+        "key": "registryHome",
+        "title": "progress 注册表",
+        "description": "orchestra-auto 的单例看板注册表，默认 ~/.orca/progress。只读取其中注册过的运行；留空则只扫描审计目录。",
+        "type": "string",
+        "default": "~/.orca/progress",
+        "placeholder": "~/.orca/progress"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "settings:own"
+    }
+  ]
+}

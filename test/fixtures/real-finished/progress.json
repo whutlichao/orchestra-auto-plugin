@@ -1,0 +1,210 @@
+{
+  "schema_version": 2,
+  "run": {
+    "phase": "done",
+    "status": "completed",
+    "orca_run_id": null,
+    "health": "unknown",
+    "id": "fixture-finished",
+    "target_repo": "/tmp/orchestra-auto-fixture-target",
+    "mode": "REAL",
+    "title": "Fixture: finished run",
+    "observation_mode": "explicit-coordinator",
+    "started_at": "2026-11-03T15:21:11.325706+00:00",
+    "last_effective_progress": "2026-11-03T15:21:11.608744+00:00",
+    "updated_at": "2026-11-03T15:21:11.816821+00:00",
+    "last_observed": "2026-11-03T15:21:11.816821+00:00",
+    "ended_at": "2026-11-03T15:21:11.816821+00:00",
+    "summary": "fixture completed"
+  },
+  "tasks": {
+    "t1": {
+      "id": "t1",
+      "title": "Ship the read-only panel",
+      "dependencies": [],
+      "status": "accepted",
+      "blocked_reason": "",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:21:11.420417+00:00"
+    }
+  },
+  "workers": {
+    "w1-a1": {
+      "id": "w1-a1",
+      "lifecycle": "closed",
+      "reported_lifecycle": "reported_done",
+      "start_confirmation": "observed",
+      "last_effective_progress": "2026-11-03T15:21:11.518366+00:00",
+      "parent_worker_id": null,
+      "task_id": "t1",
+      "dispatch_id": "d1",
+      "attempt": 1,
+      "worktree": "fixture-worktree",
+      "reported_summary": "implementation ready",
+      "last_observed": "2026-11-03T15:21:11.518366+00:00",
+      "verified_at": "2026-11-03T15:21:11.518366+00:00"
+    }
+  },
+  "deliveries": {
+    "t1": {
+      "task_id": "t1",
+      "implemented": true,
+      "integrated": true,
+      "merged": true,
+      "tracker_closed": true,
+      "evidence": [
+        "https://example.invalid/pr/2"
+      ],
+      "verified_at": "2026-11-03T15:21:11.608744+00:00"
+    }
+  },
+  "artifacts": {
+    "a-pr": {
+      "id": "a-pr",
+      "task_id": "t1",
+      "kind": "pr",
+      "label": "PR #2",
+      "reference": "https://example.invalid/pr/2",
+      "recorded_at": "2026-11-03T15:21:11.706149+00:00"
+    }
+  },
+  "events": [
+    {
+      "id": "init-1",
+      "at": "2026-11-03T15:21:11.325706+00:00",
+      "type": "init",
+      "source": "coordinator",
+      "summary": "init recorded",
+      "entity_id": "fixture-finished"
+    },
+    {
+      "id": "task-1",
+      "at": "2026-11-03T15:21:11.420417+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t1",
+      "summary": "task recorded",
+      "entity_id": "t1"
+    },
+    {
+      "id": "worker-1",
+      "at": "2026-11-03T15:21:11.518366+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t1",
+      "worker_id": "w1-a1",
+      "summary": "worker recorded",
+      "entity_id": "w1-a1"
+    },
+    {
+      "id": "delivery-1",
+      "at": "2026-11-03T15:21:11.608744+00:00",
+      "type": "delivery",
+      "source": "coordinator",
+      "task_id": "t1",
+      "evidence": [
+        "https://example.invalid/pr/2"
+      ],
+      "summary": "delivery recorded",
+      "entity_id": "t1"
+    },
+    {
+      "id": "artifact-1",
+      "at": "2026-11-03T15:21:11.706149+00:00",
+      "type": "artifact",
+      "source": "coordinator",
+      "task_id": "t1",
+      "summary": "artifact recorded",
+      "entity_id": "a-pr"
+    },
+    {
+      "id": "end-1",
+      "at": "2026-11-03T15:21:11.816821+00:00",
+      "type": "end",
+      "source": "coordinator",
+      "summary": "fixture completed",
+      "entity_id": "fixture-finished"
+    }
+  ],
+  "receipts": {
+    "init-1": {
+      "command": "init",
+      "data": {
+        "id": "fixture-finished",
+        "target_repo": "/tmp/orchestra-auto-fixture-target",
+        "mode": "REAL",
+        "phase": "delivery",
+        "status": "active",
+        "title": "Fixture: finished run"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "task-1": {
+      "command": "task",
+      "data": {
+        "id": "t1",
+        "title": "Ship the read-only panel",
+        "dependencies": [],
+        "status": "accepted"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "worker-1": {
+      "command": "worker",
+      "data": {
+        "id": "w1-a1",
+        "task_id": "t1",
+        "dispatch_id": "d1",
+        "attempt": 1,
+        "worktree": "fixture-worktree",
+        "lifecycle": "closed",
+        "start_confirmation": "observed",
+        "reported_lifecycle": "reported_done",
+        "reported_summary": "implementation ready"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "delivery-1": {
+      "command": "delivery",
+      "data": {
+        "task_id": "t1",
+        "implemented": true,
+        "integrated": true,
+        "merged": true,
+        "tracker_closed": true,
+        "evidence": [
+          "https://example.invalid/pr/2"
+        ]
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "artifact-1": {
+      "command": "artifact",
+      "data": {
+        "id": "a-pr",
+        "task_id": "t1",
+        "kind": "pr",
+        "label": "PR #2",
+        "reference": "https://example.invalid/pr/2"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "end-1": {
+      "command": "end",
+      "data": {
+        "status": "completed",
+        "phase": "done",
+        "summary": "fixture completed"
+      },
+      "source": "coordinator",
+      "effective": false
+    }
+  }
+}

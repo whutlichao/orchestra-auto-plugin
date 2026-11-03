@@ -1,0 +1,472 @@
+{
+  "schema_version": 2,
+  "run": {
+    "phase": "implementation",
+    "status": "active",
+    "orca_run_id": null,
+    "health": "degraded",
+    "id": "demo-active",
+    "target_repo": "/tmp/orchestra-auto-demo-target",
+    "mode": "DEMO",
+    "title": "DEMO: 只读观测面板",
+    "observation_mode": "explicit-coordinator",
+    "started_at": "2026-11-03T15:23:13.080586+00:00",
+    "last_effective_progress": "2026-11-03T15:23:13.982885+00:00",
+    "updated_at": "2026-11-03T15:23:20.816341+00:00",
+    "last_observed": "2026-11-03T15:23:14.160394+00:00"
+  },
+  "tasks": {
+    "t-design": {
+      "id": "t-design",
+      "title": "设计只读契约",
+      "dependencies": [],
+      "status": "accepted",
+      "blocked_reason": "",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:23:13.168321+00:00"
+    },
+    "t-panel": {
+      "id": "t-panel",
+      "title": "实现观测面板",
+      "dependencies": [
+        "t-design"
+      ],
+      "status": "running",
+      "blocked_reason": "",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:23:13.259443+00:00"
+    },
+    "t-blocked": {
+      "id": "t-blocked",
+      "title": "等待审计目录授权",
+      "dependencies": [
+        "t-design"
+      ],
+      "status": "blocked",
+      "blocked_reason": "需要用户确认审计目录",
+      "pending_decision": "",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:23:13.351640+00:00"
+    },
+    "t-docs": {
+      "id": "t-docs",
+      "title": "安装与使用文档",
+      "dependencies": [],
+      "status": "waiting_user",
+      "blocked_reason": "",
+      "pending_decision": "是否发布到 Git 安装源？",
+      "provisional": false,
+      "orca_task_id": null,
+      "verified_at": "2026-11-03T15:23:13.437178+00:00"
+    }
+  },
+  "workers": {
+    "w-design-a1": {
+      "id": "w-design-a1",
+      "lifecycle": "closed",
+      "reported_lifecycle": "reported_done",
+      "start_confirmation": "observed",
+      "last_effective_progress": "2026-11-03T15:23:13.527622+00:00",
+      "parent_worker_id": null,
+      "task_id": "t-design",
+      "dispatch_id": "d-design",
+      "attempt": 1,
+      "worktree": "demo-worktree",
+      "reported_summary": "design ready",
+      "last_observed": "2026-11-03T15:23:13.527622+00:00",
+      "verified_at": "2026-11-03T15:23:13.527622+00:00"
+    },
+    "w-panel-a1": {
+      "id": "w-panel-a1",
+      "lifecycle": "running",
+      "reported_lifecycle": "unknown",
+      "start_confirmation": "observed",
+      "last_effective_progress": "2026-11-03T15:23:13.614650+00:00",
+      "parent_worker_id": null,
+      "task_id": "t-panel",
+      "dispatch_id": "d-panel",
+      "attempt": 1,
+      "worktree": "demo-worktree",
+      "last_observed": "2026-11-03T15:23:13.790720+00:00",
+      "verified_at": "2026-11-03T15:23:13.614650+00:00"
+    },
+    "w-lost-a2": {
+      "id": "w-lost-a2",
+      "lifecycle": "lost",
+      "reported_lifecycle": "unknown",
+      "start_confirmation": "unobserved",
+      "last_effective_progress": null,
+      "parent_worker_id": null,
+      "task_id": "t-panel",
+      "dispatch_id": "d-panel",
+      "attempt": 2,
+      "worktree": "demo-worktree",
+      "last_observed": "2026-11-03T15:23:13.702305+00:00",
+      "verified_at": "2026-11-03T15:23:13.702305+00:00"
+    }
+  },
+  "deliveries": {
+    "t-design": {
+      "task_id": "t-design",
+      "implemented": true,
+      "integrated": true,
+      "merged": true,
+      "tracker_closed": false,
+      "evidence": [
+        "https://example.invalid/pr/1"
+      ],
+      "verified_at": "2026-11-03T15:23:13.982885+00:00"
+    },
+    "t-panel": {
+      "task_id": "t-panel",
+      "implemented": false,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null,
+      "evidence": [],
+      "verified_at": "2026-11-03T15:23:14.071330+00:00"
+    },
+    "t-blocked": {
+      "task_id": "t-blocked",
+      "implemented": null,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null
+    },
+    "t-docs": {
+      "task_id": "t-docs",
+      "implemented": null,
+      "integrated": null,
+      "merged": null,
+      "tracker_closed": null
+    }
+  },
+  "artifacts": {
+    "a-report": {
+      "id": "a-report",
+      "task_id": "t-design",
+      "kind": "report",
+      "label": "验收报告（示例）",
+      "reference": "https://example.invalid/report",
+      "recorded_at": "2026-11-03T15:23:14.160394+00:00"
+    }
+  },
+  "events": [
+    {
+      "id": "init-1",
+      "at": "2026-11-03T15:23:13.080586+00:00",
+      "type": "init",
+      "source": "coordinator",
+      "summary": "init recorded",
+      "entity_id": "demo-active"
+    },
+    {
+      "id": "task-design",
+      "at": "2026-11-03T15:23:13.168321+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-design",
+      "summary": "task recorded",
+      "entity_id": "t-design"
+    },
+    {
+      "id": "task-panel",
+      "at": "2026-11-03T15:23:13.259443+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "summary": "task recorded",
+      "entity_id": "t-panel"
+    },
+    {
+      "id": "task-blocked",
+      "at": "2026-11-03T15:23:13.351640+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-blocked",
+      "summary": "task recorded",
+      "entity_id": "t-blocked"
+    },
+    {
+      "id": "task-docs",
+      "at": "2026-11-03T15:23:13.437178+00:00",
+      "type": "task",
+      "source": "coordinator",
+      "task_id": "t-docs",
+      "summary": "task recorded",
+      "entity_id": "t-docs"
+    },
+    {
+      "id": "worker-design",
+      "at": "2026-11-03T15:23:13.527622+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t-design",
+      "worker_id": "w-design-a1",
+      "summary": "worker recorded",
+      "entity_id": "w-design-a1"
+    },
+    {
+      "id": "worker-panel",
+      "at": "2026-11-03T15:23:13.614650+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "worker_id": "w-panel-a1",
+      "summary": "worker recorded",
+      "entity_id": "w-panel-a1"
+    },
+    {
+      "id": "worker-lost",
+      "at": "2026-11-03T15:23:13.702305+00:00",
+      "type": "worker",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "worker_id": "w-lost-a2",
+      "summary": "worker recorded",
+      "entity_id": "w-lost-a2"
+    },
+    {
+      "id": "event-dispatch",
+      "at": "2026-11-03T15:23:13.790720+00:00",
+      "type": "dispatch",
+      "source": "coordinator",
+      "summary": "dispatched the panel worker",
+      "task_id": "t-panel",
+      "worker_id": "w-panel-a1",
+      "dispatch_id": "d-panel",
+      "attempt": 1,
+      "evidence": [
+        "https://example.invalid/evidence/dispatch"
+      ],
+      "entity_id": "t-panel"
+    },
+    {
+      "id": "delivery-design",
+      "at": "2026-11-03T15:23:13.982885+00:00",
+      "type": "delivery",
+      "source": "coordinator",
+      "task_id": "t-design",
+      "evidence": [
+        "https://example.invalid/pr/1"
+      ],
+      "summary": "delivery recorded",
+      "entity_id": "t-design"
+    },
+    {
+      "id": "delivery-panel",
+      "at": "2026-11-03T15:23:14.071330+00:00",
+      "type": "delivery",
+      "source": "coordinator",
+      "task_id": "t-panel",
+      "evidence": [],
+      "summary": "delivery recorded",
+      "entity_id": "t-panel"
+    },
+    {
+      "id": "artifact-report",
+      "at": "2026-11-03T15:23:14.160394+00:00",
+      "type": "artifact",
+      "source": "coordinator",
+      "task_id": "t-design",
+      "summary": "artifact recorded",
+      "entity_id": "a-report"
+    },
+    {
+      "id": "event-reconcile",
+      "at": "2026-11-03T15:23:20.816341+00:00",
+      "type": "reconcile",
+      "source": "coordinator",
+      "summary": "backfilled the worker row",
+      "task_id": "t-panel",
+      "worker_id": "w-panel-a1",
+      "dispatch_id": "d-panel",
+      "attempt": 1,
+      "entity_id": "t-panel",
+      "bookkeeping": true
+    }
+  ],
+  "receipts": {
+    "init-1": {
+      "command": "init",
+      "data": {
+        "id": "demo-active",
+        "target_repo": "/tmp/orchestra-auto-demo-target",
+        "mode": "DEMO",
+        "phase": "implementation",
+        "status": "active",
+        "title": "DEMO: 只读观测面板",
+        "health": "degraded"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "task-design": {
+      "command": "task",
+      "data": {
+        "id": "t-design",
+        "title": "设计只读契约",
+        "dependencies": [],
+        "status": "accepted"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-panel": {
+      "command": "task",
+      "data": {
+        "id": "t-panel",
+        "title": "实现观测面板",
+        "dependencies": [
+          "t-design"
+        ],
+        "status": "running"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-blocked": {
+      "command": "task",
+      "data": {
+        "id": "t-blocked",
+        "title": "等待审计目录授权",
+        "dependencies": [
+          "t-design"
+        ],
+        "status": "blocked",
+        "blocked_reason": "需要用户确认审计目录"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "task-docs": {
+      "command": "task",
+      "data": {
+        "id": "t-docs",
+        "title": "安装与使用文档",
+        "dependencies": [],
+        "status": "waiting_user",
+        "pending_decision": "是否发布到 Git 安装源？"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "worker-design": {
+      "command": "worker",
+      "data": {
+        "id": "w-design-a1",
+        "task_id": "t-design",
+        "dispatch_id": "d-design",
+        "attempt": 1,
+        "worktree": "demo-worktree",
+        "lifecycle": "closed",
+        "start_confirmation": "observed",
+        "reported_lifecycle": "reported_done",
+        "reported_summary": "design ready"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "worker-panel": {
+      "command": "worker",
+      "data": {
+        "id": "w-panel-a1",
+        "task_id": "t-panel",
+        "dispatch_id": "d-panel",
+        "attempt": 1,
+        "worktree": "demo-worktree",
+        "lifecycle": "running",
+        "start_confirmation": "observed",
+        "reported_lifecycle": "unknown"
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "worker-lost": {
+      "command": "worker",
+      "data": {
+        "id": "w-lost-a2",
+        "task_id": "t-panel",
+        "dispatch_id": "d-panel",
+        "attempt": 2,
+        "worktree": "demo-worktree",
+        "lifecycle": "lost",
+        "start_confirmation": "unobserved"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "event-dispatch": {
+      "command": "event",
+      "data": {
+        "type": "dispatch",
+        "summary": "dispatched the panel worker",
+        "task_id": "t-panel",
+        "worker_id": "w-panel-a1",
+        "dispatch_id": "d-panel",
+        "attempt": 1,
+        "evidence": [
+          "https://example.invalid/evidence/dispatch"
+        ]
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "delivery-design": {
+      "command": "delivery",
+      "data": {
+        "task_id": "t-design",
+        "implemented": true,
+        "integrated": true,
+        "merged": true,
+        "tracker_closed": false,
+        "evidence": [
+          "https://example.invalid/pr/1"
+        ]
+      },
+      "source": "coordinator",
+      "effective": true
+    },
+    "delivery-panel": {
+      "command": "delivery",
+      "data": {
+        "task_id": "t-panel",
+        "implemented": false,
+        "evidence": []
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "artifact-report": {
+      "command": "artifact",
+      "data": {
+        "id": "a-report",
+        "task_id": "t-design",
+        "kind": "report",
+        "label": "验收报告（示例）",
+        "reference": "https://example.invalid/report"
+      },
+      "source": "coordinator",
+      "effective": false
+    },
+    "event-reconcile": {
+      "command": "event",
+      "data": {
+        "type": "reconcile",
+        "summary": "backfilled the worker row",
+        "task_id": "t-panel",
+        "worker_id": "w-panel-a1",
+        "dispatch_id": "d-panel",
+        "attempt": 1
+      },
+      "source": "coordinator",
+      "effective": false,
+      "bookkeeping": true
+    }
+  }
+}
