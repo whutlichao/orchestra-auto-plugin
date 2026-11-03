@@ -51,7 +51,7 @@ own components-panel runtime by `src/panel.evidence.test.tsx`:
 
 `orca plugin test .` prints the rendered summaries as `UI_EVIDENCE ...` lines;
 the captured output is in `ui-interaction-evidence.txt`. The same suite reports
-32/32 passing tests.
+33/33 passing tests.
 
 ## Limits
 

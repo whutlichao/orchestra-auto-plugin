@@ -64,10 +64,14 @@ function freshness(at: number | null, now: number, staleMs: number): Freshness {
 
 function worktreeLabel(value: unknown): string {
   if (typeof value !== 'string') return ''
-  const clean = value.trim()
-  if (clean === '') return ''
-  const parts = clean.split(/[\\/]/).filter(Boolean)
-  const base = parts.length > 0 ? parts[parts.length - 1] : clean
+  // Basename only: a full worktree path must never reach the panel. Drive
+  // letters, UNC shares and trailing `.`/`..` segments fall back to the last
+  // real segment, or to '' when the path names no directory.
+  const parts = value
+    .trim()
+    .split(/[\\/]+/)
+    .filter((part) => part !== '' && part !== '.' && part !== '..' && !/^[A-Za-z]:$/.test(part))
+  const base = parts.length > 0 ? parts[parts.length - 1] : ''
   return cleanText(base, 80)
 }
 

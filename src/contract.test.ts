@@ -164,11 +164,24 @@ test('missing deliveries are unverified, never successes', () => {
 test('full worktree paths and artifact references are not in the view', () => {
   const snapshot = parseSnapshot(fixture('real-active/progress.json'))
   const worker = snapshot.workers['w-panel-a1'] as Record<string, unknown>
+  const cases: [string, string][] = [
+    ['/Users/example/secret/project/worktree', 'worktree'],
+    ['C:\\Users\\example\\worktree', 'worktree'],
+    ['\\\\server\\share\\worktree', 'worktree'],
+    ['/Users/example/project/..', 'project'],
+    ['/Users/example/project/.', 'project'],
+    ['C:', ''],
+    ['   ', '']
+  ]
+  for (const [input, expected] of cases) {
+    worker.worktree = input
+    const view = projectRun(snapshot, { source: 'audit-root', now: FIXTURE_NOW })
+    const projected = view.workers.find((item) => item.id === 'w-panel-a1')
+    assert.ok(projected)
+    assert.equal(projected.worktree, expected, 'worktree ' + JSON.stringify(input))
+  }
   worker.worktree = '/Users/example/secret/project/worktree'
   const view = projectRun(snapshot, { source: 'audit-root', now: FIXTURE_NOW })
-  const projected = view.workers.find((item) => item.id === 'w-panel-a1')
-  assert.ok(projected)
-  assert.equal(projected.worktree, 'worktree')
   assert.equal(JSON.stringify(view).includes('/Users/example'), false)
   assert.deepEqual(
     view.artifacts.map((item) => ({ kind: item.kind, label: item.label })),

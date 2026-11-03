@@ -47,18 +47,19 @@ Open **Settings → Plugins → orchestra-auto**:
 | 本地审计目录 (`auditRoots`) | One absolute path per line. A run state is readable only when its `progress.json` lives under one of these roots. Empty means the plugin reads nothing. |
 | progress 注册表 (`registryHome`) | The orchestra-auto singleton registry, default `~/.orca/progress`. Only descriptors are read from here; a descriptor's state path must still be inside an audit root. Empty disables registry discovery. |
 
-Discovery uses two sources:
+Discovery uses two sources, and only while at least one audit root is usable:
 
-1. **Registry descriptors** in `<registryHome>/runs/*.json`. The descriptor's
-   `state_path` is accepted only if it is inside a configured audit root and has
-   no symlink component.
-2. **Audit roots**. If a root itself contains `progress.json`, it is one run;
+1. **Audit roots**. If a root itself contains `progress.json`, it is one run;
    otherwise each direct child directory containing `progress.json` is a run.
    The scan is one level deep, not recursive.
+2. **Registry descriptors** in `<registryHome>/runs/*.json`. The descriptor's
+   `state_path` is accepted only if it is inside a configured audit root and has
+   no symlink component.
 
-The registry is optional. When discovery is configured, a run registered in
-`~/.orca/progress` but whose state is outside every configured audit root appears
-as unavailable and is never read.
+Empty `auditRoots` reads nothing, including the registry. With no usable audit
+root, the worker reports that instead of reading descriptors. A run registered
+in `~/.orca/progress` but whose state is outside every configured audit root
+appears as unavailable and is never read.
 
 Audit roots should be real paths, not symlinks, and outside Git repositories for
 real audit data. The repository's `samples/audit-root` is an intentional

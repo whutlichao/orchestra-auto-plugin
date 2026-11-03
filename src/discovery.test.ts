@@ -187,6 +187,30 @@ test('merges the registry and audit roots, and refuses every escape', () => {
   assert.equal(serialized.includes('/Users/'), false)
 })
 
+test('two real recorder snapshots are discovered together in one pass', () => {
+  const root = base()
+  const audit = join(root, 'audit')
+  writeRun(join(audit, 'run-a'), fixture('real-active/progress.json'))
+  writeRun(join(audit, 'run-b'), fixture('real-finished/progress.json'))
+  const result = discoverRuns({ auditRoots: audit, registryHome: '' })
+  assert.equal(result.listing.configured, true)
+  assert.equal(result.listing.rootProblems.length, 0)
+  assert.equal(result.listing.runs.length, 2)
+  const active = result.listing.runs.find((run) => run.id === 'fixture-active')
+  const finished = result.listing.runs.find((run) => run.id === 'fixture-finished')
+  assert.ok(active)
+  assert.ok(finished)
+  assert.equal(active.availability, 'available')
+  assert.equal(finished.availability, 'available')
+  // Active observations sort before the ended run of the same observation age.
+  assert.equal(active.taskCount, 5)
+  assert.equal(finished.taskCount, 1)
+  assert.equal(finished.status, 'completed')
+  const lookup = lookupRun(result, 'fixture-finished')
+  assert.equal(lookup.ok, true)
+  if (lookup.ok) assert.equal(lookup.view.taskCounts.total, 1)
+})
+
 test('unconfigured settings read no registry and list nothing', () => {
   const root = base()
   const registry = join(root, 'registry')

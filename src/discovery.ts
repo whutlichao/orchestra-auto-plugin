@@ -665,14 +665,18 @@ export function discoverRuns(settings: DiscoverySettings): DiscoveryResult {
   }
 
   const entries = new Map<string, RunEntry>()
-  if (configured && ctx.roots.length > 0) {
+  if (!configured) {
+    // Empty settings read nothing at all.
+  } else if (ctx.roots.length === 0) {
+    // Without a usable audit root no descriptor could be accepted anyway; say
+    // so instead of silently reading nothing.
+    ctx.warnings.push('没有可用的审计目录；未读取注册表')
+  } else {
     for (const root of ctx.roots) {
       scanRoot(root, entries, ctx)
       if (ctx.stop) break
     }
     if (!ctx.stop) collectRegistry(settings.registryHome, entries, ctx)
-  } else if (configured) {
-    ctx.warnings.push('没有可用的审计目录；未读取注册表')
   }
 
   const runs = [...entries.values()].map((entry) => entry.summary)
