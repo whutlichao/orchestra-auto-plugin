@@ -132,8 +132,8 @@ documented in [`docs/progress-contract.md`](docs/progress-contract.md).
 Known limitation on the tested Orca 1.4.247 macOS bundle: `orca plugin types .`
 fails because the app bundle does not contain
 `resources/plugins/{declarative,types}/*.d.ts`, so `npx tsc -p .` cannot run.
-This does not affect `validate`, `test`, `check`, loading, or the panel. It is a
-packaging gap in that Orca build, not a plugin build step.
+This does not affect `validate`, `test` or `check`; it is a packaging gap in
+that Orca build, not a plugin build step.
 
 ## Limitations
 
