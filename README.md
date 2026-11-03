@@ -22,7 +22,7 @@ worker, or call Orca hooks.
 
 ## Install
 
-Requires Orca `>=1.4.246`; tested on Orca `1.4.247` on macOS.
+Requires Orca `>=1.4.247`; tested on Orca `1.4.247` on macOS. The floor matches the components catalog this panel uses (Table, Tabs, KeyValue, Collapsible and the other catalog-2 components).
 
 For development, from this repository:
 
