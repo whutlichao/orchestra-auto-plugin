@@ -1,11 +1,13 @@
 // Read-only observatory panel for orchestra-auto runs.
 //
-// The default view is the recorded topology: the run as coordinator, workers
-// linked only by parent_worker_id, their task association, status and recorded
-// attention. Missing, invalid, cyclic and truncated relations stay explicit.
-// Secondary facts live behind the "细节" tab; nothing is written or executed.
+// The main view is the recorded topology as a node-and-link graph: the run as a
+// coordinator card, workers linked only by parent_worker_id, each node showing
+// its name, task and status. Selecting a node expands its recorded facts inline;
+// attention and run details open on demand. Missing, invalid, cyclic, truncated,
+// stale and unavailable states stay explicit. Nothing is written or executed.
 import {
   Badge,
+  Box,
   Button,
   Callout,
   Collapsible,
@@ -13,6 +15,8 @@ import {
   Heading,
   IconButton,
   KeyValue,
+  List,
+  ListItem,
   read,
   RelativeTime,
   Row,
@@ -22,8 +26,6 @@ import {
   Spinner,
   Stack,
   Table,
-  Tab,
-  Tabs,
   Text
 } from 'orca'
 import {
@@ -56,18 +58,20 @@ import {
   type WorkerRelation
 } from './topology'
 import {
+  attentionOpen,
   detail,
   detailError,
   detailLoading,
+  detailsOpen,
   listing,
   listingError,
   loading,
   refresh,
   selectRun,
   selectedRunId,
-  selectedTab,
   selectedWorkerId
 } from './panel-state'
+import { planGraph, type GraphPlan, type GraphRow } from './graph'
 
 type Tone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
 
@@ -80,6 +84,12 @@ const WARNING_LIMIT = 6
 const ATTENTION_LIMIT = 10
 const DETACHED_TASK_LIMIT = 50
 const WORKER_ROW_LIMIT = 100
+// One rail cell per recorded ancestor level, plus the elbow into the node.
+const GRAPH_INDENT = 12
+// Where an elbow meets a node card: below its rounded corner, on the straight border.
+const GRAPH_TICK_Y = 12
+// Edge weight in the host's muted token: 2 px reads as a drawn link on both themes.
+const GRAPH_LINE = 2
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {
   unknown: '未知',
@@ -173,12 +183,6 @@ const HEALTH_TONE: Record<RunHealth, Tone> = {
   degraded: 'warning',
   blocked: 'warning',
   lost: 'danger',
-  unknown: 'neutral'
-}
-
-const MODE_TONE: Record<RunMode, Tone> = {
-  REAL: 'accent',
-  DEMO: 'warning',
   unknown: 'neutral'
 }
 
@@ -333,37 +337,163 @@ function lifecycleTone(lifecycle: WorkerLifecycle): Tone {
   }
 }
 
-type TopologyRow = { node: TopologyWorker; depth: number }
+/** A short recorded fact with the tone it should carry. */
+type ToneLabel = { label: string; tone: Tone }
 
-function flattenRows(nodes: TopologyWorker[], depth: number, output: TopologyRow[]): void {
-  for (const node of nodes) {
-    output.push({ node, depth })
-    flattenRows(node.children, depth + 1, output)
-  }
+/** A wrapping row of short recorded facts; renders nothing when there are none. */
+function ToneBadges({ items }: { items: ToneLabel[] }) {
+  if (items.length === 0) return null
+  return (
+    <Row gap="xs" wrap>
+      {items.map((item, index) => (
+        <Badge key={index} tone={item.tone}>
+          {item.label}
+        </Badge>
+      ))}
+    </Row>
+  )
 }
 
-function AttentionSection({ view }: { view: RunView }) {
+/** Card border: selection, then recorded trouble. A clean row keeps the neutral border. */
+function nodeBorder(node: TopologyWorker, selected: boolean): true | Tone {
+  if (selected) return 'accent'
+  if (node.relation === 'cycle') return 'danger'
+  if (node.worker.lifecycle === 'failed' || node.worker.lifecycle === 'lost') return 'danger'
+  if (node.attention.length > 0) return 'warning'
+  if (node.worker.freshness === 'stale') return 'warning'
+  return true
+}
+
+/** Recorded markers only: attention count, stale observation, unobserved start, relation gap. */
+function nodeMarkers(node: TopologyWorker): ToneLabel[] {
+  const markers: ToneLabel[] = []
+  if (node.attention.length > 0) {
+    markers.push({ label: '需关注 ' + node.attention.length, tone: 'warning' })
+  }
+  if (node.worker.freshness === 'stale') {
+    markers.push({ label: '观测过期', tone: 'warning' })
+  }
+  if (node.worker.startConfirmation === 'unobserved') {
+    markers.push({ label: '启动未观察', tone: 'warning' })
+  }
+  if (node.relation !== 'root' && node.relation !== 'child') {
+    markers.push({
+      label: RELATION_DISPLAY[node.relation].badge,
+      tone: RELATION_TONE[node.relation]
+    })
+  }
+  return markers
+}
+
+/**
+ * One graph node: the worker's name, its recorded task and its status. The whole
+ * card is the press target, so it is reachable and activatable from the keyboard.
+ */
+function WorkerNode({ node, selected }: { node: TopologyWorker; selected: boolean }) {
+  const markers = nodeMarkers(node)
+  return (
+    <Box border={nodeBorder(node, selected)} radius="sm" background="card">
+      <List label={'Worker ' + node.worker.id}>
+        <ListItem
+          title={cleanText(node.worker.id, 60)}
+          current={selected}
+          onPress={() => set(selectedWorkerId, selected ? '' : node.worker.id)}
+        >
+          <Row gap="xs" align="center">
+            <Text size="xs" muted truncate>
+              {workerTaskText(node)}
+            </Text>
+            <Badge tone={lifecycleTone(node.worker.lifecycle)}>
+              {LIFECYCLE_LABEL[node.worker.lifecycle]}
+            </Badge>
+          </Row>
+          <ToneBadges items={markers} />
+        </ListItem>
+      </List>
+    </Box>
+  )
+}
+
+/**
+ * One planned graph row. Edges are drawn as real line segments in the host's
+ * muted token: one rail cell per recorded ancestor whose trunk continues past
+ * this row, then the elbow into the card. A top-level row has no incoming edge,
+ * because no parent was recorded.
+ */
+function WorkerNodeRow({ row, selectedId }: { row: GraphRow; selectedId: string }) {
+  const selected = row.node.worker.id === selectedId
+  const card = (
+    <Box direction="column" paddingY="xs" gap="sm">
+      <WorkerNode node={row.node} selected={selected} />
+      {row.cutChildren > 0 ? (
+        <Text muted size="xs">
+          {'还有 ' + row.cutChildren + ' 个下层 Worker 未显示'}
+        </Text>
+      ) : null}
+      {selected ? (
+        <Box direction="column" gap="xs">
+          <WorkerDetail node={row.node} />
+          <Text muted size="xs">
+            再次点击该节点收起详情。
+          </Text>
+        </Box>
+      ) : null}
+    </Box>
+  )
+  if (row.depth === 0) return card
+  return (
+    <Row align="stretch" gap="none">
+      {row.rails.map((active, index) => (
+        <Box key={'rail-' + index} width={GRAPH_INDENT} direction="row" align="stretch">
+          {active ? <Box width={GRAPH_LINE} background="muted" /> : null}
+        </Box>
+      ))}
+      <Box width={GRAPH_INDENT} direction="column" align="stretch">
+        <Box width={GRAPH_LINE} height={GRAPH_TICK_Y} background="muted" />
+        <Box width={GRAPH_INDENT} height={GRAPH_LINE} background="muted" />
+        {row.hasFollowingSibling ? (
+          <Box grow={true} direction="row" align="stretch" justify="start">
+            <Box width={GRAPH_LINE} background="muted" />
+          </Box>
+        ) : null}
+      </Box>
+      <Box grow={true} direction="column">
+        {card}
+      </Box>
+    </Row>
+  )
+}
+
+function WorkerGraph({ plan, selectedId }: { plan: GraphPlan; selectedId: string }) {
+  return (
+    <Stack gap="none">
+      {plan.rows.map((row) => (
+        <WorkerNodeRow key={'node:' + row.node.worker.id} row={row} selectedId={selectedId} />
+      ))}
+    </Stack>
+  )
+}
+
+function AttentionList({ view }: { view: RunView }) {
+  if (view.attention.length === 0) {
+    return (
+      <Text muted size="xs">
+        没有已记录的阻塞、待决或失败。
+      </Text>
+    )
+  }
   return (
     <Stack gap="xs">
-      <Heading level={3}>需要关注</Heading>
-      {view.attention.length === 0 ? (
-        <Text muted size="xs">
-          没有已记录的阻塞、待决或失败。
+      {view.attention.slice(0, ATTENTION_LIMIT).map((item) => (
+        <Text key={item.id} size="xs">
+          • {item.text}
         </Text>
-      ) : (
-        <Stack gap="xs">
-          {view.attention.slice(0, ATTENTION_LIMIT).map((item) => (
-            <Text key={item.id} size="xs">
-              • {item.text}
-            </Text>
-          ))}
-          {view.attentionTotal > ATTENTION_LIMIT ? (
-            <Text muted size="xs">
-              还有 {view.attentionTotal - ATTENTION_LIMIT} 项未显示。
-            </Text>
-          ) : null}
-        </Stack>
-      )}
+      ))}
+      {view.attentionTotal > ATTENTION_LIMIT ? (
+        <Text muted size="xs">
+          还有 {view.attentionTotal - ATTENTION_LIMIT} 项未显示。
+        </Text>
+      ) : null}
     </Stack>
   )
 }
@@ -421,62 +551,133 @@ function WorkerDetail({ node }: { node: TopologyWorker }) {
   )
 }
 
-function WorkerRow({
-  row,
-  selected
-}: {
-  row: TopologyRow
-  selected: boolean
-}) {
-  const node = row.node
-  const indentation =
-    row.depth === 0
-      ? ''
-      : row.depth <= 4
-        ? '↳'.repeat(row.depth)
-        : '↳↳↳↳+' + (row.depth - 4)
-  const task =
-    '任务：' +
-    workerTaskText(node) +
-    (node.task ? '（' + TASK_STATUS_LABEL[node.task.status] + '）' : '')
-  const relation =
-    row.depth > 0 || node.relation === 'child'
-      ? '父 ' + (node.parentId ?? '未记录')
-      : node.relation === 'root'
-        ? ''
-        : relationText(node)
+function CoordinatorNode({ view }: { view: RunView }) {
+  return (
+    <Box border="accent" radius="sm" background="card" padding="sm" direction="column" gap="xs">
+      <Row justify="between" align="center" gap="sm">
+        <Text size="sm" weight="medium">
+          协调者
+        </Text>
+        <Badge tone={RUN_STATUS_TONE[view.status]}>{RUN_STATUS_LABEL[view.status]}</Badge>
+      </Row>
+      <Text muted size="xs" truncate>
+        本运行
+      </Text>
+    </Box>
+  )
+}
+
+function TopologyBadges({ topology }: { topology: Topology }) {
+  const markers: ToneLabel[] = []
+  if (topology.counts.workersWithoutRecordedTask > 0) {
+    markers.push({
+      label: '未记录任务 ' + topology.counts.workersWithoutRecordedTask,
+      tone: 'warning'
+    })
+  }
+  if (topology.counts.workersWithInvalidTask > 0) {
+    markers.push({
+      label: '任务记录无效 ' + topology.counts.workersWithInvalidTask,
+      tone: 'warning'
+    })
+  }
+  if (topology.detachedTasks.length > 0) {
+    markers.push({ label: '未关联任务 ' + topology.detachedTasks.length, tone: 'neutral' })
+  }
+  return <ToneBadges items={markers} />
+}
+
+/** The graph of workers with no recorded parent: no edge is drawn into them. */
+function RootWorkerGraph({ plan, workerId }: { plan: GraphPlan; workerId: string }) {
+  if (plan.rows.length === 0) {
+    return (
+      <Text muted size="xs">
+        没有未记录父关系的顶层 Worker；其余记录见关系异常。
+      </Text>
+    )
+  }
   return (
     <Stack gap="xs">
-      <Row gap="xs" wrap align="center">
-        {indentation ? (
+      <Row justify="between" align="center" gap="sm">
+        <Text muted size="xs">
+          顶层 Worker · 未记录父关系
+        </Text>
+        {plan.truncated ? (
           <Text muted size="xs">
-            {indentation}
+            {plan.shown + ' / ' + plan.total}
           </Text>
         ) : null}
-        <Button
-          size="sm"
-          variant={selected ? 'solid' : 'ghost'}
-          tooltip={'选择 ' + node.worker.id + ' 查看详情'}
-          onPress={() => set(selectedWorkerId, selected ? '' : node.worker.id)}
-        >
-          {cleanText(node.worker.id, 40)}
-        </Button>
-        <Badge tone={lifecycleTone(node.worker.lifecycle)}>
-          {LIFECYCLE_LABEL[node.worker.lifecycle]}
-        </Badge>
-        {node.attention.length > 0 ? (
-          <Badge tone="warning">需关注 {node.attention.length}</Badge>
-        ) : null}
-        {node.worker.freshness === 'stale' ? <Badge tone="warning">过期</Badge> : null}
-        {node.worker.startConfirmation === 'unobserved' ? (
-          <Badge tone="warning">启动未观察</Badge>
-        ) : null}
       </Row>
-      <Text size="xs">
-        {task}
-        {relation ? ' · ' + relation : ''}
-      </Text>
+      <WorkerGraph plan={plan} selectedId={workerId} />
+      {plan.truncated ? (
+        <Text muted size="xs">
+          图中仅显示前 {WORKER_ROW_LIMIT} 个 Worker（含嵌套行），共 {plan.total} 个。
+        </Text>
+      ) : null}
     </Stack>
+  )
+}
+
+/** Recorded edges that cannot be placed: kept explicit, never attached to the run. */
+function AnomalyGroup({
+  topology,
+  plan,
+  workerId
+}: {
+  topology: Topology
+  plan: GraphPlan
+  workerId: string
+}) {
+  const cyclePresent = topology.anomalies.some((each) => each.relation === 'cycle')
+  const tone: Tone = cyclePresent ? 'danger' : 'warning'
+  return (
+    <Box border={tone} radius="sm" padding="sm" direction="column" gap="sm">
+      <Row justify="between" align="center" gap="sm">
+        <Text size="sm" weight="medium">
+          {'关系异常 · ' + topology.anomalies.length}
+        </Text>
+        <Badge tone={tone}>未并入协调者</Badge>
+      </Row>
+      <Text muted size="xs">
+        父节点缺失、无效、未读取或成环；这些 Worker 不会并入协调者，也不画父连线。
+        {topology.depthLimited > 0
+          ? ' 其中 ' + topology.depthLimited + ' 个因层级过深而平铺。'
+          : ''}
+      </Text>
+      <WorkerGraph plan={plan} selectedId={workerId} />
+      {plan.truncated ? (
+        <Text muted size="xs">
+          关系异常中仅显示前 {WORKER_ROW_LIMIT} 个 Worker（含嵌套行），共 {plan.total} 个。
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+function DetachedTasks({ tasks }: { tasks: TaskView[] }) {
+  return (
+    <Collapsible
+      title={'未关联任务 · ' + tasks.length}
+      description="没有 Worker 的 task_id 指向它们"
+    >
+      <Stack gap="sm">
+        {tasks.slice(0, DETACHED_TASK_LIMIT).map((task) => (
+          <Stack key={'task:' + task.id} gap="xs">
+            <Text size="sm">{task.id}</Text>
+            <Text size="xs">
+              {cleanText(task.title, 160)} · 状态 {TASK_STATUS_LABEL[task.status]}
+              {task.dependencies.length > 0 ? ' · 依赖 ' + task.dependencies.join(', ') : ''}
+            </Text>
+          </Stack>
+        ))}
+        {tasks.length > DETACHED_TASK_LIMIT ? (
+          <Text muted size="xs">
+            未关联任务仅显示前 {DETACHED_TASK_LIMIT} 个，共 {tasks.length} 个。
+          </Text>
+        ) : null}
+        <Text muted size="xs">未关联不代表没有执行。</Text>
+      </Stack>
+    </Collapsible>
   )
 }
 
@@ -501,7 +702,7 @@ function TopologySection({
         ) : (
           <EmptyState
             title="没有 Worker 记录"
-            description="快照的 workers 为空；这不代表没有执行。任务记录见“细节”。"
+            description="快照的 workers 为空；这不代表没有执行。任务记录见“运行详情”。"
             icon="agent"
           />
         )}
@@ -509,50 +710,16 @@ function TopologySection({
     )
   }
 
-  const rootRows: TopologyRow[] = []
-  const anomalyRows: TopologyRow[] = []
-  flattenRows(topology.roots, 0, rootRows)
-  flattenRows(topology.anomalies, 0, anomalyRows)
-  const rootShown = rootRows.slice(0, WORKER_ROW_LIMIT)
-  const anomalyShown = anomalyRows.slice(0, WORKER_ROW_LIMIT)
-  const detachedShown = topology.detachedTasks.slice(0, DETACHED_TASK_LIMIT)
+  const rootPlan = planGraph(topology.roots, WORKER_ROW_LIMIT)
+  const anomalyPlan = planGraph(topology.anomalies, WORKER_ROW_LIMIT)
   const node = workerId ? topologyNode(topology, workerId) : null
-  const shownWorkerIds = new Set(
-    [...rootShown, ...anomalyShown].map((row) => row.node.worker.id)
-  )
-  const renderRows = (rows: TopologyRow[]) =>
-    rows.map((row) => (
-      <Stack key={'worker:' + row.node.worker.id} gap="sm">
-        <WorkerRow
-          row={row}
-          selected={row.node.worker.id === workerId}
-        />
-        {row.node.worker.id === workerId ? <WorkerDetail node={row.node} /> : null}
-      </Stack>
-    ))
-
+  const shownIds = new Set([
+    ...rootPlan.rows.map((row) => row.node.worker.id),
+    ...anomalyPlan.rows.map((row) => row.node.worker.id)
+  ])
   return (
     <Stack gap="md">
-      <Row gap="xs" wrap>
-        <Badge tone="neutral">Worker {view.workerTotal}</Badge>
-        {view.attentionTotal > 0 ? <Badge tone="warning">需关注 {view.attentionTotal}</Badge> : null}
-        {topology.counts.anomalies > 0 ? (
-          <Badge tone="danger">关系异常 {topology.counts.anomalies}</Badge>
-        ) : null}
-        {topology.counts.workersWithoutRecordedTask > 0 ? (
-          <Badge tone="warning">
-            未记录任务 {topology.counts.workersWithoutRecordedTask}
-          </Badge>
-        ) : null}
-        {topology.counts.workersWithInvalidTask > 0 ? (
-          <Badge tone="warning">
-            任务记录无效 {topology.counts.workersWithInvalidTask}
-          </Badge>
-        ) : null}
-        {topology.detachedTasks.length > 0 ? (
-          <Badge tone="neutral">未关联任务 {topology.detachedTasks.length}</Badge>
-        ) : null}
-      </Row>
+      <TopologyBadges topology={topology} />
       {topology.projectionTruncated ? (
         <Callout tone="warning" title="Worker 投影已截断">
           <Text size="xs">
@@ -560,88 +727,27 @@ function TopologySection({
           </Text>
         </Callout>
       ) : null}
-      <Stack gap="xs">
-        <Heading level={3}>协调者 · 本运行</Heading>
-        <Text muted size="xs">
-          {'运行状态 ' +
-            RUN_STATUS_LABEL[view.status] +
-            ' · 快照记录 ' +
-            view.workerTotal +
-            ' 个 Worker · ' +
-            view.attentionTotal +
-            ' 项需关注' +
-            (topology.counts.anomalies > 0
-              ? ' · ' + topology.counts.anomalies + ' 个关系异常'
-              : '')}
-        </Text>
-        <Text muted size="xs">
-          未记录 parent_worker_id 的 Worker 列在顶层；缩进和“父 …”只来自已记录字段。
-        </Text>
-      </Stack>
-      {rootRows.length > WORKER_ROW_LIMIT ? (
-        <Text muted size="xs">
-          Worker 行仅显示前 {WORKER_ROW_LIMIT} 个（含嵌套行），共 {rootRows.length} 个。
-        </Text>
-      ) : null}
-      {rootShown.length > 0 ? <Stack gap="sm">{renderRows(rootShown)}</Stack> : null}
-      {anomalyRows.length > 0 ? (
-        <Stack gap="sm">
-          <Separator />
-          <Heading level={3}>关系异常 · {anomalyRows.length}</Heading>
-          <Text muted size="xs">
-            父节点缺失、未知或成环；不会并入协调者。
-            {topology.depthLimited > 0
-              ? ' 其中 ' + topology.depthLimited + ' 个因层级过深而平铺。'
-              : ''}
-          </Text>
-          {anomalyRows.length > WORKER_ROW_LIMIT ? (
-            <Text muted size="xs">
-              关系异常中的 Worker 行仅显示前 {WORKER_ROW_LIMIT} 个（含嵌套行），共{' '}
-              {anomalyRows.length} 个。
-            </Text>
-          ) : null}
-          {renderRows(anomalyShown)}
-        </Stack>
+      <CoordinatorNode view={view} />
+      <RootWorkerGraph plan={rootPlan} workerId={workerId} />
+      {topology.anomalies.length > 0 ? (
+        <AnomalyGroup topology={topology} plan={anomalyPlan} workerId={workerId} />
       ) : null}
       {topology.detachedTasks.length > 0 ? (
-        <Stack gap="sm">
-          <Separator />
-          <Heading level={3}>未关联 Worker 的任务 · {topology.detachedTasks.length}</Heading>
-          <Text muted size="xs">
-            这些任务没有 Worker 的 task_id 指向它们；未关联不代表没有执行。
-          </Text>
-          {topology.detachedTasks.length > DETACHED_TASK_LIMIT ? (
-            <Text muted size="xs">
-              未关联任务仅显示前 {DETACHED_TASK_LIMIT} 个，共 {topology.detachedTasks.length} 个。
-            </Text>
-          ) : null}
-          {detachedShown.map((task) => (
-            <Stack key={'task:' + task.id} gap="xs">
-              <Text size="sm">{task.id}</Text>
-              <Text size="xs">
-                {cleanText(task.title, 160)} · 状态 {TASK_STATUS_LABEL[task.status]}
-                {task.dependencies.length > 0 ? ' · 依赖 ' + task.dependencies.join(', ') : ''}
-              </Text>
-            </Stack>
-          ))}
-        </Stack>
+        <DetachedTasks tasks={topology.detachedTasks} />
       ) : null}
-      {node && !shownWorkerIds.has(node.worker.id) ? (
+      {node === null ? (
+        <Text muted size="xs">点击图中的 Worker 节点查看任务、关系与生命周期。</Text>
+      ) : shownIds.has(node.worker.id) ? null : (
         <Stack gap="sm">
           <Separator />
           <Text muted size="xs">
-            该 Worker 不在当前显示的行中（可能被行数上限截断）。
+            该 Worker 不在当前显示的图中（可能被行数上限截断）。
           </Text>
           <WorkerDetail node={node} />
         </Stack>
-      ) : null}
-      {node === null ? (
-        <Text muted size="xs">
-          选择拓扑中的一个 Worker 查看任务、生命周期与自报细节。
-        </Text>
-      ) : null}
+      )}
       <Text muted size="xs">
-        父子关系只来自 parent_worker_id；未记录父 Worker 的列在顶层，不声称直接隶属；父节点缺失、无效、成环或超出读取上限时不会推断归属。
+        连线只表示已记录的 parent_worker_id；未记录父 Worker 的节点在顶层且不画父连线，缺失、无效、未读取或成环的关系不会被推断归属。
       </Text>
     </Stack>
   )
@@ -892,26 +998,48 @@ function DetailsSection({ view }: { view: RunView }) {
   )
 }
 
+function AttentionBlock({ view }: { view: RunView }) {
+  if (view.attentionTotal === 0) {
+    return (
+      <Text muted size="xs">
+        没有已记录的阻塞、待决或失败。
+      </Text>
+    )
+  }
+  return (
+    <Collapsible
+      title={'关注事项 · ' + view.attentionTotal}
+      description="阻塞、待决、失败与失联"
+      open={read(attentionOpen)}
+      onChange={(value: boolean) => set(attentionOpen, value === true)}
+    >
+      <AttentionList view={view} />
+    </Collapsible>
+  )
+}
+
+function RunDetailsBlock({ view }: { view: RunView }) {
+  return (
+    <Collapsible
+      title="运行详情"
+      description="元数据、任务、交付、产物与事件"
+      open={read(detailsOpen)}
+      onChange={(value: boolean) => set(detailsOpen, value === true)}
+    >
+      <DetailsSection view={view} />
+    </Collapsible>
+  )
+}
+
 function Detail({ view }: { view: RunView }) {
-  const rawTab = read(selectedTab)
-  const activeTab = rawTab === 'details' ? 'details' : 'topology'
   const topology = buildTopology(view)
   const selectedWorker = read(selectedWorkerId)
   return (
     <Stack gap="md">
-      <AttentionSection view={view} />
-      <Tabs
-        label="运行详情"
-        value={activeTab}
-        onChange={(value) => set(selectedTab, value === 'details' ? 'details' : 'topology')}
-      >
-        <Tab value="topology" label="拓扑">
-          <TopologySection view={view} topology={topology} workerId={selectedWorker} />
-        </Tab>
-        <Tab value="details" label="细节">
-          <DetailsSection view={view} />
-        </Tab>
-      </Tabs>
+      <TopologySection view={view} topology={topology} workerId={selectedWorker} />
+      <Separator />
+      <AttentionBlock view={view} />
+      <RunDetailsBlock view={view} />
     </Stack>
   )
 }
@@ -939,9 +1067,36 @@ function RunSelector({ listing: value, selected }: { listing: RunListing; select
       value={selected || undefined}
       placeholder="选择运行"
       options={value.runs.map((run) => ({ value: run.id, label: optionLabel(run) }))}
-      onChange={(runId) => selectRun(runId)}
+      onChange={(runId: string) => selectRun(runId)}
     />
   )
+}
+
+/** Only the exceptional states become badges; a healthy current run needs none. */
+function runBadges(input: {
+  mode: RunMode
+  freshness: Freshness
+  health: RunHealth
+  availability: RunAvailability
+}): ToneLabel[] {
+  const badges: ToneLabel[] = []
+  if (input.mode === 'DEMO') badges.push({ label: 'DEMO', tone: 'warning' })
+  if (input.freshness !== 'current') {
+    badges.push({
+      label: '时效 ' + FRESHNESS_LABEL[input.freshness],
+      tone: freshnessTone(input.freshness)
+    })
+  }
+  if (input.health !== 'healthy' && input.health !== 'unknown') {
+    badges.push({ label: '健康 ' + HEALTH_LABEL[input.health], tone: HEALTH_TONE[input.health] })
+  }
+  if (input.availability !== 'available') {
+    badges.push({
+      label: AVAILABILITY_LABEL[input.availability],
+      tone: AVAILABILITY_TONE[input.availability]
+    })
+  }
+  return badges
 }
 
 function RunHeader({
@@ -954,24 +1109,34 @@ function RunHeader({
   observedAt: number | null
 }) {
   const status = view?.status ?? summary?.status ?? 'unknown'
-  const health = view?.health ?? summary?.health ?? 'unknown'
-  const mode = view?.mode ?? summary?.mode ?? 'unknown'
-  const freshness = view?.freshness ?? 'unknown'
+  const badges = runBadges({
+    mode: view?.mode ?? summary?.mode ?? 'unknown',
+    freshness: view?.freshness ?? 'unknown',
+    health: view?.health ?? summary?.health ?? 'unknown',
+    availability: summary?.availability ?? 'available'
+  })
   return (
     <Stack gap="xs">
       <Heading level={3}>{view?.title || summaryLabel(summary) || '未命名运行'}</Heading>
       <Row gap="xs" wrap align="center">
-        <Badge tone={MODE_TONE[mode]}>{MODE_LABEL[mode]}</Badge>
-        <Badge tone={RUN_STATUS_TONE[status]}>{RUN_STATUS_LABEL[status]}</Badge>
-        <Badge tone={HEALTH_TONE[health]}>健康 {HEALTH_LABEL[health]}</Badge>
-        <Badge tone={freshnessTone(freshness)}>时效 {FRESHNESS_LABEL[freshness]}</Badge>
-        {summary && summary.availability !== 'available' ? (
-          <Badge tone={AVAILABILITY_TONE[summary.availability]}>
-            {AVAILABILITY_LABEL[summary.availability]}
-          </Badge>
-        ) : null}
+        <Text muted size="xs">
+          {'运行 ' +
+            RUN_STATUS_LABEL[status] +
+            ' · ' +
+            (view?.workerTotal ?? 0) +
+            ' 个 Worker · ' +
+            (view?.attentionTotal ?? 0) +
+            ' 项需关注 · 观测'}
+        </Text>
+        {observedAt === null ? (
+          <Text muted size="xs">
+            未知
+          </Text>
+        ) : (
+          <RelativeTime at={observedAt} muted />
+        )}
+        <ToneBadges items={badges} />
       </Row>
-      <TimeRow label="最近观测" at={observedAt} />
     </Stack>
   )
 }
@@ -984,7 +1149,7 @@ export default function Panel() {
   const isLoading = read(loading)
   const isDetailLoading = read(detailLoading)
   const selected = read(selectedRunId)
-  const selectedSummary = currentListing?.runs.find((run) => run.id === selected)
+  const selectedSummary = currentListing?.runs.find((run: RunSummary) => run.id === selected)
   const observedAt = currentDetail?.lastObservedAt ?? selectedSummary?.observedAt ?? null
 
   let content
@@ -1050,9 +1215,12 @@ export default function Panel() {
         ) : null}
         <RootProblems listing={currentListing} />
         {currentListing.warnings.length > 0 ? (
-          <Callout tone="warning" title="读取提示">
+          <Collapsible
+            title={'读取提示 · ' + currentListing.warnings.length}
+            description="注册表与审计目录的读取提示"
+          >
             <WarningLines lines={currentListing.warnings} />
-          </Callout>
+          </Collapsible>
         ) : null}
         {currentListing.runs.length === 0 ? (
           <EmptyState
@@ -1065,31 +1233,22 @@ export default function Panel() {
             <RunSelector listing={currentListing} selected={selected} />
             <RunHeader view={currentDetail} summary={selectedSummary} observedAt={observedAt} />
             {currentDetail?.mode === 'DEMO' ? (
-              <Callout tone="warning" title="DEMO 数据">
-                <Text size="xs">该运行标记为 DEMO；示例数据不代表真实执行或验收。</Text>
-              </Callout>
+              <Text size="xs" tone="warning">
+                DEMO 示例数据，不代表真实执行或验收。
+              </Text>
             ) : null}
             {currentDetail?.freshness === 'stale' ? (
-              <Callout tone="warning" title="观测已过期">
-                <Text size="xs">
-                  最近观测已超过 {Math.round(STALE_SECONDS / 60)} 分钟；过期不等于失败，也不代表没有进展。
-                </Text>
-              </Callout>
-            ) : null}
-            {currentDetail?.health === 'degraded' ||
-            currentDetail?.health === 'blocked' ||
-            currentDetail?.health === 'lost' ? (
-              <Callout
-                tone={currentDetail.health === 'lost' ? 'danger' : 'warning'}
-                title="运行健康"
-              >
-                <Text size="xs">记录的健康状态：{HEALTH_LABEL[currentDetail.health]}。</Text>
-              </Callout>
+              <Text size="xs" tone="warning">
+                最近观测已超过 {Math.round(STALE_SECONDS / 60)} 分钟；过期不等于失败，也不代表没有进展。
+              </Text>
             ) : null}
             {currentDetail && currentDetail.warnings.length > 0 ? (
-              <Callout tone="warning" title="快照提示">
+              <Collapsible
+                title={'快照提示 · ' + currentDetail.warnings.length}
+                description="记录在 progress.json 中的读取提示"
+              >
                 <WarningLines lines={currentDetail.warnings} />
-              </Callout>
+              </Collapsible>
             ) : null}
             {isDetailLoading && currentDetail !== null ? (
               <Row gap="xs" align="center">

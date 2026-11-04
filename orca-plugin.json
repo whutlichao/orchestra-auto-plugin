@@ -9,7 +9,7 @@
     "name": "whutlichao"
   },
   "engines": {
-    "orca": ">=1.4.247"
+    "orca": ">=1.4.248"
   },
   "execution": "trusted-worker",
   "pluginApi": 1,

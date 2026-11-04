@@ -1,12 +1,13 @@
 # orchestra-auto observatory
 
 A read-only Orca sidebar panel for [orchestra-auto](https://github.com/whutlichao/orchestra-auto)
-runs. Its default view is the recorded coordinator/worker topology: the run as
-coordinator, each worker's `parent_worker_id`, its task, lifecycle and recorded
-attention, with an explicit state for missing, orphaned, invalid, cyclic, stale,
-corrupt and unavailable data. Secondary facts live behind the **细节** tab. The
-panel does not write run state, execute orchestration, control a worker, or call
-Orca hooks.
+runs. Its main view is a node-and-link graph of the recorded topology: the run as
+a coordinator card, each worker as a card, and one drawn connector per recorded
+`parent_worker_id`. A node shows only the worker's name, its task and its status;
+clicking one expands its recorded facts inline. Run attention and run details
+open on demand. Missing, orphaned, invalid, cyclic, stale, corrupt and
+unavailable data each keep an explicit state. The panel does not write run state,
+execute orchestration, control a worker, or call Orca hooks.
 
 ## Quick start (中文)
 
@@ -24,7 +25,7 @@ Orca hooks.
 
 ## Install
 
-Requires Orca `>=1.4.247`; tested on Orca `1.4.247` on macOS. The floor matches the components catalog this panel uses (Table, Tabs, KeyValue, Collapsible and the other catalog-2 components).
+Requires Orca `>=1.4.248`; tested on Orca `1.4.248` on macOS. The floor matches the components catalog this panel uses: `Box` (catalog 4, 1.4.248) draws the graph's rails and elbows, together with the catalog-2 components (Table, Tabs, KeyValue, Collapsible, ListItem and the rest).
 
 For development, from this repository:
 
@@ -83,50 +84,65 @@ evidence. `demo-corrupt` demonstrates the corrupt state. See
 
 ## What the panel shows
 
-### 拓扑 (topology, default)
+The panel has one main view and two on-demand sections. The run summary is a
+single line under the run selector: status, worker count, attention count,
+observation time and only the exceptional badges (DEMO, stale, degraded health,
+unavailable).
 
-The run itself is the coordinator. The panel never invents a coordinator worker
-row: `parent_worker_id` is the only source of worker-to-worker edges.
+### 运行拓扑 (the graph)
 
-- A worker with no recorded `parent_worker_id` is listed at the top level. The
-  absence itself is recorded; the panel does not claim a parent edge.
-- A worker whose recorded parent exists is indented with `↳`, and its row names
-  the recorded parent. Deeper recorded chains keep indenting up to 12 worker
-  levels (after four levels the prefix compacts to `↳↳↳↳+n`); deeper rows are
-  listed in the anomaly group instead of being silently dropped.
-- Each row shows the worker ID, verified lifecycle, recorded attention count,
-  stale observation and unobserved start markers, plus the task association.
-  Selecting a worker expands its detail inline: task, relation, dispatch,
-  attempt, verified and self-reported lifecycle, start confirmation, freshness,
-  worktree basename, self-report summary and its recorded attention items.
-- Feedback on the row is a recorded count. Selecting the row is the only
-  expansion; the row itself never claims acceptance or progress.
+The run is a coordinator card at the top. Workers are cards below it, and
+`parent_worker_id` is the only source of worker-to-worker edges:
 
-The **关系异常** (relationship anomaly) group keeps unresolved edges explicit:
+- A worker with no recorded `parent_worker_id` has **no incoming connector**. The
+  absence is recorded, so the panel does not draw an edge from the coordinator or
+  from another worker. These rows sit in the `顶层 Worker · 未记录父关系` group.
+- A recorded parent draws a real connector: a vertical trunk on the left of the
+  sibling group and an elbow into the child card. Each level indents by one rail
+  cell, so deeper chains stay readable in a narrow sidebar (12 recorded levels;
+  deeper rows move to the anomaly group instead of being dropped).
+- A node shows only three facts: the worker name, its recorded task (or
+  `未记录` / `记录无效` / `<id>（未记录于 tasks）`) and its verified lifecycle.
+  Recorded attention, stale observation, unobserved start and a relation gap add
+  a marker badge; a card border turns warning or danger only for recorded trouble.
+- Selecting a node (click, Enter or Space: the card is a real button) expands its
+  detail under that node: task, relation, dispatch, attempt, verified and
+  self-reported lifecycle, start confirmation, freshness, worktree basename,
+  self-report summary and its recorded attention items. Selecting it again
+  closes the detail.
+- The graph is not a text-indented tree: `src/graph.ts` plans rows, and the panel
+  renders each edge as a filled line segment in the host's `muted` token
+  (`Box`), so a trunk ends where its branch ends.
+
+The **关系异常** group keeps unresolved edges explicit and never attaches them to
+the coordinator:
 
 | Situation | Shown as |
 | --- | --- |
-| `parent_worker_id` is absent/null | Top-level row; no parent edge is claimed. |
-| `parent_worker_id` is recorded but the parent is not in the projected workers | `父 <id> 未记录`; never attached to the coordinator. |
-| `parent_worker_id` is present but not a portable ID | `父 Worker 记录无效`; the raw value is not rendered. |
-| Parent chain cycles | `父关系成环`; members are listed together, not attached to the coordinator. |
-| Parent chain exceeds the 12-worker display depth | `层级过深`; listed flat in the anomaly group. |
-| Parents exist beyond the 500-worker projection cap | `父 <id> 不在已读取的 Worker 中`; not reclassified as missing. |
+| `parent_worker_id` is absent/null | Top-level group `未记录父关系`; no incoming edge is drawn. |
+| `parent_worker_id` is recorded but the parent is not in the projected workers | `父节点缺失` badge; `父 <id> 未记录` in the detail. |
+| `parent_worker_id` is present but not a portable ID | `父关系无效` badge; the raw value is not rendered. |
+| Parent chain cycles | `父关系成环`; members are listed together with danger tone, no edge. |
+| Parent chain exceeds the 12-worker display depth | `层级过深`; listed flat in the anomaly group, with a "N 个因层级过深而平铺" note. |
+| Parents exist beyond the 500-worker projection cap | `父节点未读取`; `父 <id> 不在已读取的 Worker 中`, not reclassified as missing. |
 
 Tasks are linked only by each worker's recorded `task_id`:
 
-- A missing `task_id` renders `任务：未记录`.
-- A `task_id` that names no recorded task renders `任务：<id>（未记录于 tasks）`.
-- An invalid `task_id` renders `任务：记录无效`.
-- Recorded tasks with no worker pointing at them appear under **未关联 Worker
-  的任务**; "unassociated" does not mean "not executed".
+- A missing `task_id` renders `未记录`; an invalid one renders `记录无效`.
+- A `task_id` that names no recorded task renders `<id>（未记录于 tasks）`.
+- Recorded tasks with no worker pointing at them sit in the collapsed
+  **未关联任务** section; "unassociated" does not mean "not executed".
 
-The top-level **需要关注** list contains only recorded problem signals (blocked or
-pending-decision tasks, failed/rejected tasks, failed/lost workers, and
-run-level waiting/failed states). Stale observation is a separate warning, not a
-failure.
+### 关注事项 (on demand)
 
-### 细节 (secondary details)
+The collapsed **关注事项** section holds only recorded problem signals (blocked or
+pending-decision tasks, failed/rejected tasks, failed/lost workers, and run-level
+waiting/failed states). Stale observation is a separate warning, not a failure.
+With nothing recorded, the panel says so in one line instead of an empty section.
+
+### 运行详情 (on demand)
+
+The collapsed **运行详情** section holds the secondary facts:
 
 - **运行元数据**: run ID, Orca run ID, mode, phase, schema, source and timestamps.
 - **任务**: status counts and a table with each task's status, worker count,
@@ -142,18 +158,31 @@ Missing, unknown and stale values are rendered as such. A missing delivery is
 **unverified**, never success. A `completed` run status is shown as recorded
 state, not as independent acceptance.
 
+### Host UI capability
+
+Orca supports two panel UI kinds: `html` (a page in an isolated frame) and
+`components` (the panel returns a tree of catalog components, which Orca draws
+with its own controls). The panel stays a `components` panel: its data comes
+from the worker bridge, and an `html` frame would drop that bridge and force a
+different read model. Orca 1.4.248's catalog 4 adds `Box`, which exposes
+width/height tokens, host colour tokens and stretch layout, so the graph's
+trunks and elbows are real drawn elements in the host theme rather than text
+indentation. No extra capability or security-model change is involved: the
+manifest still asks only for `settings:own`.
+
 ### Narrow sidebar, empty and large data
 
-- Two tabs fit a 336 px sidebar; wide task/delivery columns are dropped below
-  480 px, leaving the identifying and status columns.
-- The topology is a row list, not a wide table: worker IDs, status badges and
-  task lines wrap instead of being squeezed into a label column.
+- The graph is a vertical layout, so a 336 px sidebar (or 280 px) keeps every
+  node readable: cards wrap their task and markers instead of scrolling sideways.
+- Wide task/delivery columns are dropped below 480 px, leaving the identifying
+  and status columns.
 - A run with no `workers` shows an explicit empty state that says this is not
   proof that no execution happened. A missing projection with a positive
   `workerTotal` is called out instead of shown as empty.
-- At most 100 rows in the root-worker tree and 100 rows in the anomaly tree are
-  rendered, with nested rows counted as rows; at most 50 detached tasks are
-  rendered. Counts and truncation notes always use the true totals.
+- At most 100 rows in the top-level graph and 100 rows in the anomaly graph are
+  drawn, with nested rows counted as rows; a cut row says how many of its
+  descendants are hidden, and the group label plus a note always carry the true
+  totals. At most 50 detached tasks are listed.
 
 ## Privacy and safety boundaries
 
@@ -173,8 +202,8 @@ The worker enforces these before reading a file:
 
 Limits: 8 MiB per snapshot, 64 MiB per discovery pass, 16 audit roots, 200
 registry descriptors, 1000 directory entries per root, 200 runs, 500 projected
-tasks/workers/deliveries, 100 rendered rows in the root-worker tree, 100
-rendered rows in the anomaly tree, 50 detached tasks, 12 displayed worker
+tasks/workers/deliveries, 100 rendered graph rows in the top-level group, 100
+rendered graph rows in the anomaly group, 50 detached tasks, 12 displayed worker
 levels, 100 rows per task or delivery table, 50 artifacts, 100 projected
 attention records (10 rendered), and 20 events. Counts remain complete, and
 truncation is shown with the true total.
@@ -194,18 +223,21 @@ documented in [`docs/progress-contract.md`](docs/progress-contract.md).
 ## UI evidence
 
 [`docs/evidence/`](docs/evidence/README.md) contains Orca-rendered screenshots
-of the isolated DEMO scenarios: topology, selected worker detail, the 细节 tab,
-finished, no workers, large worker counts, unavailable and corrupt. It also
+of the isolated DEMO scenarios: the graph, a selected worker's inline detail,
+missing/invalid parents, a cycle, three branches, a deep chain, long text,
+120 workers (truncation), the 关注事项 and 运行详情 sections, a finished run, no
+workers, stale, unavailable, corrupt, and a 280 px wide capture. It also
 captures the `UI_EVIDENCE` output from the real components-panel runtime test
-that selects a worker, switches tabs and runs, and presses refresh. The capture
-commands, the reversible window minimize/restore, and the still-frame limits
-are documented there.
+that selects a worker, opens and closes 运行详情, switches runs and presses
+refresh. The capture commands, the reversible window minimize/restore, and the
+still-frame limits are documented there.
 
-Known limitation on the tested Orca 1.4.247 macOS bundle: `orca plugin types .`
+Known limitation on the tested Orca 1.4.248 macOS bundle: `orca plugin types .`
 fails because the app bundle does not contain
-`resources/plugins/{declarative,types}/*.d.ts`, so `npx tsc -p .` cannot run.
-This does not affect `validate`, `test` or `check`; it is a packaging gap in
-that Orca build, not a plugin build step.
+`resources/plugins/declarative/*.d.ts` or `resources/plugins/types/*.d.ts`, so
+`npx tsc -p .` cannot resolve the host `orca` module. This does not affect
+`validate`, `test` or `check`; it is a packaging gap in that Orca build, not a
+plugin build step.
 
 ## Limitations
 

@@ -89,21 +89,22 @@ never promotes an unresolved worker to a direct report.
 
 | Recorded state | Topology result |
 | --- | --- |
-| `parent_worker_id` absent/null | Top-level worker row. The panel does not claim a parent edge. |
-| `parent_worker_id` resolves to another projected worker | Child row, indented with the recorded parent's ID. |
+| `parent_worker_id` absent/null | Top-level graph row with no incoming connector. The panel does not claim a parent edge. |
+| `parent_worker_id` resolves to another projected worker | Child node drawn with a connector from the recorded parent's branch; its detail names that parent. |
 | `parent_worker_id` recorded but not in the projected workers | `missing-parent` anomaly; `父 <id> 未记录`. |
 | `parent_worker_id` present but non-portable | `invalid-parent` anomaly; the raw value is discarded. |
 | Parent chain contains a cycle | `cycle` anomaly for each member; cycle members are not nested inside each other. |
 | Parent chain exceeds 12 worker levels | The deeper subtree is listed flat as `depth-limit` rather than dropped or re-parented. |
 | Projection hit the 500-worker cap and the parent is outside it | `unresolved-parent`; shown as "not in the read workers", not as missing. |
 
-Indentation compacts after four levels (`↳↳↳↳+n`); every nested row still
-names its recorded parent, and rows past the depth cap are listed flat in the
-anomaly group rather than re-parented.
+Each recorded level adds one rail cell; a node's detail still names its recorded
+parent. Rows past the depth cap are listed flat in the anomaly group rather than
+re-parented, and a row cut by the render budget states how many descendants it
+hides.
 
 Task association follows the same pattern: `none` renders as unrecorded,
 `recorded` with no matching task renders the missing task ID, and `invalid`
-renders `任务：记录无效`. A recorded task with no worker's `task_id`
+renders `记录无效` on the node and in the detail. A recorded task with no worker's `task_id`
 pointing at it is listed separately as unassociated; this is not evidence that
 the task was not executed.
 

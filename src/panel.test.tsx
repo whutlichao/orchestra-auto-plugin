@@ -1,6 +1,6 @@
-// Panel tests: the coordinator/worker topology, explicit relationship gaps,
+// Panel tests: the recorded topology graph, explicit relationship gaps,
 // on-demand details, narrow columns, empty and large states. The worker is
-// always stubbed.
+// always stubbed, so no audit directory is read.
 import { afterEach, assert, hostError, mockHost, mount, test, type TestPanel } from 'orca/testing'
 import * as panel from './panel'
 import {
@@ -39,41 +39,101 @@ function hostFor(run: typeof sampleView) {
   })
 }
 
-test('renders the coordinator, recorded hierarchy, tasks and attention', async () => {
+/** The drawn element shape the test kit exposes, enough to inspect connector props. */
+type DrawnElement = { type: string; props: Record<string, unknown> }
+
+/** Drawable connector segments: the 1px rails, elbows and ticks of the graph. */
+function edgeSegments(panelView: TestPanel): DrawnElement[] {
+  return (panelView.findAll({ type: 'Box' }) as DrawnElement[]).filter(
+    (element) => element.props.background === 'muted'
+  )
+}
+
+test('renders the coordinator and the recorded hierarchy as a graph', async () => {
   view = await mount(panel, { host: readyHost() })
   assert.ok(view.find({ text: 'orchestra-auto' }))
-  assert.ok(view.find({ text: /协调者 · 本运行/ }))
+  assert.ok(view.find({ text: '协调者' }))
+  assert.ok(view.find({ text: '本运行' }))
+  assert.ok(view.find({ text: '顶层 Worker · 未记录父关系' }))
+  assert.ok(view.find({ text: /w-plan-a1/ }))
   assert.ok(view.find({ text: /w-panel-a1/ }))
-  assert.ok(view.find({ text: /任务：实现只读面板（运行中） · 父 w-plan-a1/ }))
-  assert.ok(view.find({ text: /需关注 2/ }))
-  assert.ok(view.find({ text: /关系异常 · 2/ }))
-  assert.ok(view.find({ text: /父 w-api-parent-ghost 未记录/ }))
-  assert.ok(view.find({ text: /父 Worker 记录无效/ }))
+  assert.ok(view.find({ text: /w-panel-helper/ }))
+  assert.ok(view.find({ text: /实现只读面板/ }))
+  assert.ok(view.find({ text: '运行中' }))
+  // Recorded parent edges are drawn as line segments, not as text indentation.
+  assert.ok(edgeSegments(view).length > 0)
+  // The graph is the main view: no tab bar hides it.
+  assert.equal(view.find({ type: 'Tabs' }), null)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-test('a selected worker shows its recorded task, relation and lifecycle details', async () => {
+test('a top-level worker gets no invented parent edge', async () => {
+  view = await mount(panel, {
+    host: hostFor({
+      ...sampleView,
+      workerTotal: 1,
+      attention: [],
+      attentionTotal: 0,
+      workers: [sampleView.workers[0]]
+    })
+  })
+  assert.ok(view.find({ text: /w-plan-a1/ }))
+  assert.ok(view.find({ text: '顶层 Worker · 未记录父关系' }))
+  assert.equal(edgeSegments(view).length, 0)
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
+
+test('a selected node shows its recorded detail inline, and pressing again closes it', async () => {
   view = await mount(panel, { host: readyHost() })
-  await view.press({ type: 'Button', text: 'w-panel-a1' })
+  assert.equal(view.find({ text: /Worker 详情/ }), null)
+  await view.press({ type: 'ListItem', text: /w-panel-a1/ })
   assert.ok(view.find({ text: /Worker 详情/ }))
   assert.ok(view.find({ text: /父 Worker w-plan-a1/ }))
-  assert.ok(view.find({ text: /实现只读面板/ }))
   assert.ok(view.find({ text: /核验生命周期/ }))
   assert.ok(view.find({ text: /自报生命周期/ }))
+  await view.press({ type: 'ListItem', text: /w-panel-a1/ })
+  assert.equal(view.find({ text: /Worker 详情/ }), null)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-test('renders recorded facts and marks missing delivery facts as unverified', async () => {
+test('keeps the on-demand sections closed until asked', async () => {
   view = await mount(panel, { host: readyHost() })
-  assert.ok(view.find({ text: /示例：只读观测面板/ }))
-  assert.ok(view.find({ text: /示例数据不代表真实执行或验收/ }))
-  assert.ok(view.find({ text: /等待审计目录权限/ }))
-  await view.select({ label: '运行详情' }, 'details')
+  assert.equal(view.find({ type: 'Heading', text: '运行元数据' }), null)
+  assert.equal(view.find({ type: 'Table', label: '任务' }), null)
+  const details = view.find({ type: 'Collapsible', label: '运行详情' })
+  assert.equal(details?.props.open, false)
+  const attention = view.find({ type: 'Collapsible', label: /关注事项/ })
+  assert.equal(attention?.props.open, false)
+
+  await view.toggle({ label: '运行详情' })
+  assert.ok(view.find({ type: 'Heading', text: '运行元数据' }))
+  assert.ok(view.find({ type: 'Table', label: '任务' }))
   assert.ok(view.find({ text: /未核验/ }))
   assert.ok(view.find({ text: /没有 delivery 不代表成功/ }))
-  assert.ok(view.find({ text: /ot-plan-1/ }))
+
+  await view.toggle({ label: /关注事项/ })
+  assert.ok(view.find({ type: 'Text', text: /等待审计目录权限/ }))
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
+
+test('narrow task and delivery tables drop their wide columns', async () => {
+  view = await mount(panel, { host: readyHost() })
+  await view.toggle({ label: '运行详情' })
+  assert.deepEqual(view.columnsOf({ label: '任务' }, { width: 336 }), [
+    'id',
+    'title',
+    'status',
+    'workers'
+  ])
+  assert.deepEqual(view.columnsOf({ label: '交付' }, { width: 336 }), [
+    'task',
+    'implemented',
+    'merged'
+  ])
   assert.ok(view.columnsOf({ label: '任务' }, { width: 800 }).includes('orca'))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
@@ -95,38 +155,15 @@ test('does not show a finished status for an active run with no verified deliver
     })
   })
   assert.equal(view.find({ text: '已完成' }), null)
-  await view.select({ label: '运行详情' }, 'details')
+  await view.toggle({ label: '运行详情' })
   assert.ok(view.find({ text: /未核验/ }))
   assert.ok(view.find({ text: /没有 delivery 不代表成功/ }))
   assert.ok(view.find({ text: /ot-plan-1/ }))
-  assert.ok(view.columnsOf({ label: '任务' }, { width: 800 }).includes('orca'))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-test('keeps two tabs and hides wide task columns in a narrow sidebar', async () => {
-  view = await mount(panel, { host: readyHost() })
-  assert.deepEqual(
-    view.findAll({ type: 'Tab' }).map((tab) => tab.label),
-    ['拓扑', '细节']
-  )
-  await view.select({ label: '运行详情' }, 'details')
-  assert.deepEqual(view.columnsOf({ label: '任务' }, { width: 336 }), [
-    'id',
-    'title',
-    'status',
-    'workers'
-  ])
-  assert.deepEqual(view.columnsOf({ label: '交付' }, { width: 336 }), [
-    'task',
-    'implemented',
-    'merged'
-  ])
-  assert.deepEqual(view.errors, [])
-  assert.deepEqual(view.refusals, [])
-})
-
-test('shows an explicit empty topology when workers are not recorded', async () => {
+test('shows an explicit empty graph when workers are not recorded', async () => {
   view = await mount(panel, {
     host: hostFor({
       ...sampleView,
@@ -137,11 +174,10 @@ test('shows an explicit empty topology when workers are not recorded', async () 
   })
   assert.ok(view.find({ text: /没有 Worker 记录/ }))
   assert.ok(view.find({ text: /这不代表没有执行/ }))
-  assert.equal(view.find({ text: /协调者 · 本运行/ }), null)
+  assert.equal(view.find({ text: '协调者' }), null)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
-
 
 test('a parent cycle is shown as an anomaly, not as a hierarchy', async () => {
   view = await mount(panel, {
@@ -168,10 +204,12 @@ test('a parent cycle is shown as an anomaly, not as a hierarchy', async () => {
   })
   assert.ok(view.find({ text: /关系异常 · 2/ }))
   assert.ok(view.find({ text: /父关系成环/ }))
+  assert.ok(view.find({ text: /不会并入协调者/ }))
+  // Cycle members are not attached to a parent: no connector is drawn for them.
+  assert.equal(edgeSegments(view).length, 0)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
-
 
 test('distinguishes an invalid task reference from an unrecorded task', async () => {
   view = await mount(panel, {
@@ -196,15 +234,17 @@ test('distinguishes an invalid task reference from an unrecorded task', async ()
       ]
     })
   })
-  assert.ok(view.find({ text: /任务：未记录/ }))
-  assert.ok(view.find({ text: /任务：记录无效/ }))
   assert.ok(view.find({ text: /未记录任务 1/ }))
   assert.ok(view.find({ text: /任务记录无效 1/ }))
+  await view.press({ type: 'ListItem', text: /w-no-task/ })
+  assert.ok(view.find({ text: /未记录父 Worker/ }))
+  await view.press({ type: 'ListItem', text: /w-bad-task/ })
+  assert.ok(view.find({ text: /未记录父 Worker/ }))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-test('bounds a large nested worker set and reports row totals', async () => {
+test('bounds a large nested worker set and reports the true total', async () => {
   const roots = Array.from({ length: 120 }, (_, index) => ({
     ...sampleView.workers[0],
     id: 'w-bulk-' + index,
@@ -231,18 +271,17 @@ test('bounds a large nested worker set and reports row totals', async () => {
       attentionTotal: 0
     })
   })
-  assert.ok(view.find({ text: /Worker 240/ }))
-  assert.ok(view.find({ text: /快照记录 240 个 Worker/ }))
-  assert.ok(view.find({ text: /Worker 行仅显示前 100 个（含嵌套行），共 240 个/ }))
+  assert.ok(view.find({ text: /240 个 Worker/ }))
+  assert.ok(view.find({ text: /100 \/ 240/ }))
+  assert.ok(view.find({ text: /图中仅显示前 100 个 Worker（含嵌套行），共 240 个/ }))
   assert.ok(view.find({ text: /w-bulk-0/ }))
   assert.equal(view.find({ text: /w-bulk-119/ }), null)
-  assert.equal(view.findAll({ type: 'Button' }).length, 100)
+  assert.equal(view.findAll({ type: 'ListItem' }).length, 100)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-
-test('compacts deep indentation while keeping the recorded parent visible', async () => {
+test('keeps deep recorded chains and names the parent in the detail', async () => {
   const workers = Array.from({ length: 7 }, (_, index) => ({
     ...sampleView.workers[0],
     id: 'w-deep-' + index,
@@ -260,8 +299,11 @@ test('compacts deep indentation while keeping the recorded parent visible', asyn
       attentionTotal: 0
     })
   })
-  assert.ok(view.find({ text: /↳↳↳↳\+2/ }))
-  assert.ok(view.find({ text: /父 w-deep-5/ }))
+  for (let index = 0; index < workers.length; index += 1) {
+    assert.ok(view.find({ text: new RegExp('w-deep-' + index) }))
+  }
+  await view.press({ type: 'ListItem', text: /w-deep-6/ })
+  assert.ok(view.find({ text: /父 Worker w-deep-5/ }))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
@@ -354,6 +396,30 @@ test('a failed listing keeps an explicit error instead of a false empty success'
     })
   })
   assert.ok(view.find({ text: /读取超时/ }))
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
+
+test('a worker whose parent is outside the projection stays unresolved', async () => {
+  view = await mount(panel, {
+    host: hostFor({
+      ...sampleView,
+      workerTotal: 501,
+      attention: [],
+      attentionTotal: 0,
+      workers: [
+        {
+          ...sampleView.workers[1],
+          id: 'w-orphan',
+          parentWorkerId: 'w-outside-cap',
+          parentState: 'recorded'
+        }
+      ]
+    })
+  })
+  assert.ok(view.find({ text: /父节点未读取/ }))
+  await view.press({ type: 'ListItem', text: /w-orphan/ })
+  assert.ok(view.find({ text: /不在已读取的 Worker 中/ }))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
