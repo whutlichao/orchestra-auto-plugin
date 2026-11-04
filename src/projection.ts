@@ -34,6 +34,7 @@ import {
   type DeliveryView,
   type EventView,
   type Freshness,
+  type ReferenceState,
   type RunSource,
   type RunStatus,
   type RunView,
@@ -45,6 +46,12 @@ import type { Snapshot } from './snapshot'
 
 function portableOrNull(value: unknown): string | null {
   return isPortableId(value) ? value : null
+}
+
+/** Distinguishes a field that is absent from one recorded with a non-portable value. */
+function referenceState(value: unknown): ReferenceState {
+  if (value === null || value === undefined) return 'none'
+  return isPortableId(value) ? 'recorded' : 'invalid'
 }
 
 function positiveIntOrNull(value: unknown): number | null {
@@ -100,12 +107,16 @@ function projectWorkers(snapshot: Snapshot, now: number, staleMs: number): Worke
   for (const [key, raw] of Object.entries(snapshot.workers)) {
     const worker = raw as Record<string, unknown>
     const lastObservedAt = timestamp(worker.last_observed)
+    const taskState = referenceState(worker.task_id)
+    const parentState = referenceState(worker.parent_worker_id)
     workers.push({
       id: key,
-      taskId: portableOrNull(worker.task_id),
+      taskId: taskState === 'recorded' ? (worker.task_id as string) : null,
+      taskState,
       dispatchId: portableOrNull(worker.dispatch_id),
       attempt: positiveIntOrNull(worker.attempt),
-      parentWorkerId: portableOrNull(worker.parent_worker_id),
+      parentWorkerId: parentState === 'recorded' ? (worker.parent_worker_id as string) : null,
+      parentState,
       lifecycle: enumValue(worker.lifecycle, WORKER_LIFECYCLES, 'unknown'),
       reportedLifecycle: enumValue(worker.reported_lifecycle, WORKER_LIFECYCLES, 'unknown'),
       startConfirmation: enumValue(worker.start_confirmation, START_CONFIRMATIONS, 'unknown'),

@@ -1,8 +1,9 @@
 // Read-side vocabulary for orchestra-auto progress.json (schema v1 and v2).
 //
 // Declarations and shared helpers only: the snapshot parser lives in
-// `snapshot.ts`, the projection in `projection.ts`, and the panel's UI
-// vocabulary in `presentation.ts`. Nothing here reads files or infers success.
+// `snapshot.ts`, the projection in `projection.ts`, the recorded topology in
+// `topology.ts`, and the rendered panel in `panel.tsx`. Nothing here reads
+// files or infers success.
 
 export const RUN_STATUSES = [
   'unknown',
@@ -64,6 +65,10 @@ export const DELIVERY_FIELDS = [
   'tracker_closed'
 ] as const
 export type DeliveryField = (typeof DELIVERY_FIELDS)[number]
+
+/** How a worker's recorded task/parent reference looks before topology is built. */
+export const REFERENCE_STATES = ['none', 'recorded', 'invalid'] as const
+export type ReferenceState = (typeof REFERENCE_STATES)[number]
 
 export const ARTIFACT_KINDS = ['report', 'test', 'commit', 'pr', 'other'] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
@@ -135,9 +140,13 @@ export type TaskView = {
 export type WorkerView = {
   id: string
   taskId: string | null
+  /** `none` for no record, `recorded` for a portable ID, `invalid` for a bad value. */
+  taskState: ReferenceState
   dispatchId: string | null
   attempt: number | null
   parentWorkerId: string | null
+  /** `none` means the worker reports directly to the coordinator. */
+  parentState: ReferenceState
   lifecycle: WorkerLifecycle
   reportedLifecycle: WorkerLifecycle
   startConfirmation: StartConfirmation

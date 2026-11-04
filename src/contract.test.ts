@@ -208,6 +208,43 @@ test('freshness distinguishes current, stale and unknown observations', () => {
   )
 })
 
+
+test('task and parent references distinguish absent, recorded and invalid values', () => {
+  const snapshot = parseSnapshot(fixture('real-active/progress.json'))
+  const worker = snapshot.workers['w-panel-a1'] as Record<string, unknown>
+  const project = () =>
+    projectRun(snapshot, { source: 'audit-root', now: FIXTURE_NOW }).workers.find(
+      (item) => item.id === 'w-panel-a1'
+    )
+
+  worker.task_id = 't-panel'
+  worker.parent_worker_id = 'w-plan-a1'
+  let projected = project()
+  assert.ok(projected)
+  assert.equal(projected.taskState, 'recorded')
+  assert.equal(projected.taskId, 't-panel')
+  assert.equal(projected.parentState, 'recorded')
+  assert.equal(projected.parentWorkerId, 'w-plan-a1')
+
+  worker.task_id = 42
+  worker.parent_worker_id = 'w/plan'
+  projected = project()
+  assert.ok(projected)
+  assert.equal(projected.taskState, 'invalid')
+  assert.equal(projected.taskId, null)
+  assert.equal(projected.parentState, 'invalid')
+  assert.equal(projected.parentWorkerId, null)
+
+  delete worker.task_id
+  delete worker.parent_worker_id
+  projected = project()
+  assert.ok(projected)
+  assert.equal(projected.taskState, 'none')
+  assert.equal(projected.taskId, null)
+  assert.equal(projected.parentState, 'none')
+  assert.equal(projected.parentWorkerId, null)
+})
+
 test('schema v1 stays readable and unknown values stay unknown', () => {
   const v1: Snapshot = parseSnapshot(
     JSON.stringify({

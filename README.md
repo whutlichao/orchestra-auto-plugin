@@ -1,10 +1,12 @@
 # orchestra-auto observatory
 
 A read-only Orca sidebar panel for [orchestra-auto](https://github.com/whutlichao/orchestra-auto)
-runs. It shows the run status, tasks, workers and delivery facts recorded in
-`progress.json`, with an explicit state for missing, stale, corrupt and
-unavailable data. It does not write run state, execute orchestration, control a
-worker, or call Orca hooks.
+runs. Its default view is the recorded coordinator/worker topology: the run as
+coordinator, each worker's `parent_worker_id`, its task, lifecycle and recorded
+attention, with an explicit state for missing, orphaned, invalid, cyclic, stale,
+corrupt and unavailable data. Secondary facts live behind the **细节** tab. The
+panel does not write run state, execute orchestration, control a worker, or call
+Orca hooks.
 
 ## Quick start (中文)
 
@@ -81,20 +83,76 @@ evidence. `demo-corrupt` demonstrates the corrupt state. See
 
 ## What the panel shows
 
-- **Overview**: recorded run status, health, mode, phase, freshness, last
-  observation and last effective progress, attention items, and a four-row
-  delivery summary.
-- **Tasks**: task IDs, titles, status, dependencies and blocked/pending notes.
-- **Worker**: verified lifecycle, self-reported lifecycle, start confirmation,
-  attempt, freshness, workspace basename and self-report summary. Self-report is
-  not acceptance; `observed` and `unobserved` are not the same.
-- **Delivery**: strict `true` / `false` / unverified for `implemented`,
-  `integrated`, `merged` and `tracker_closed`; artifact labels only.
-- **Events**: the most recent recorded events, with bookkeeping marked.
+### 拓扑 (topology, default)
+
+The run itself is the coordinator. The panel never invents a coordinator worker
+row: `parent_worker_id` is the only source of worker-to-worker edges.
+
+- A worker with no recorded `parent_worker_id` is listed at the top level. The
+  absence itself is recorded; the panel does not claim a parent edge.
+- A worker whose recorded parent exists is indented with `↳`, and its row names
+  the recorded parent. Deeper recorded chains keep indenting up to 12 worker
+  levels; deeper rows are listed in the anomaly group instead of being silently
+  dropped.
+- Each row shows the worker ID, verified lifecycle, recorded attention count,
+  stale observation and unobserved start markers, plus the task association.
+  Selecting a worker expands its detail inline: task, relation, dispatch,
+  attempt, verified and self-reported lifecycle, start confirmation, freshness,
+  worktree basename, self-report summary and its recorded attention items.
+- Feedback on the row is a recorded count. Selecting the row is the only
+  expansion; the row itself never claims acceptance or progress.
+
+The **关系异常** (relationship anomaly) group keeps unresolved edges explicit:
+
+| Situation | Shown as |
+| --- | --- |
+| `parent_worker_id` is absent/null | Top-level row; no parent edge is claimed. |
+| `parent_worker_id` is recorded but the parent is not in the projected workers | `父 <id> 未记录`; never attached to the coordinator. |
+| `parent_worker_id` is present but not a portable ID | `父 Worker 记录无效`; the raw value is not rendered. |
+| Parent chain cycles | `父关系成环`; members are listed together, not attached to the coordinator. |
+| Parent chain exceeds the 12-worker display depth | `层级过深`; listed flat in the anomaly group. |
+| Parents exist beyond the 500-worker projection cap | `父 <id> 不在已读取的 Worker 中`; not reclassified as missing. |
+
+Tasks are linked only by each worker's recorded `task_id`:
+
+- A missing `task_id` renders `任务：未记录`.
+- A `task_id` that names no recorded task renders `任务：<id>（未记录于 tasks）`.
+- An invalid `task_id` renders `任务记录无效`.
+- Recorded tasks with no worker pointing at them appear under **未关联 Worker
+  的任务**; "unassociated" does not mean "not executed".
+
+The top-level **需要关注** list contains only recorded problem signals (blocked or
+pending-decision tasks, failed/rejected tasks, failed/lost workers, and
+run-level waiting/failed states). Stale observation is a separate warning, not a
+failure.
+
+### 细节 (secondary details)
+
+- **运行元数据**: run ID, Orca run ID, mode, phase, schema, source and timestamps.
+- **任务**: status counts and a table with each task's status, worker count,
+  dependencies and notes. The worker count is the number of recorded `task_id`
+  references; 0 is not proof that no work happened.
+- **交付事实**: strict `true` / `false` / unverified counts for `implemented`,
+  `integrated`, `merged` and `tracker_closed`, plus the per-task table.
+- **产物**: artifact kind, label and task ID only; references are not rendered.
+- **最近事件**: a collapsed summary of the latest recorded events.
 
 Missing, unknown and stale values are rendered as such. A missing delivery is
 **unverified**, never success. A `completed` run status is shown as recorded
 state, not as independent acceptance.
+
+### Narrow sidebar, empty and large data
+
+- Two tabs fit a 336 px sidebar; wide task/delivery columns are dropped below
+  480 px, leaving the identifying and status columns.
+- The topology is a row list, not a wide table: worker IDs, status badges and
+  task lines wrap instead of being squeezed into a label column.
+- A run with no `workers` shows an explicit empty state that says this is not
+  proof that no execution happened. A missing projection with a positive
+  `workerTotal` is called out instead of shown as empty.
+- At most 100 root workers and 100 anomaly workers are rendered (each with its
+  own true total), and at most 50 detached tasks. Counts and truncation notes
+  always use the snapshot's true totals.
 
 ## Privacy and safety boundaries
 
@@ -114,9 +172,11 @@ The worker enforces these before reading a file:
 
 Limits: 8 MiB per snapshot, 64 MiB per discovery pass, 16 audit roots, 200
 registry descriptors, 1000 directory entries per root, 200 runs, 500 projected
-tasks/workers/deliveries, 100 rows per table, 100 projected attention records
-(20 rendered), and 20 events. Counts remain complete, and truncation is shown
-with the true total.
+tasks/workers/deliveries, 100 rendered root workers, 100 rendered anomaly
+workers, 50 detached tasks, 12 displayed worker levels, 100 rows per task or
+delivery table, 50 artifacts, 100 projected attention records (10 rendered),
+and 20 events. Counts remain complete, and truncation is shown with the true
+total.
 
 ## Development
 
@@ -132,12 +192,13 @@ documented in [`docs/progress-contract.md`](docs/progress-contract.md).
 
 ## UI evidence
 
-[`docs/evidence/`](docs/evidence/README.md) contains four Orca-rendered
-screenshots of the isolated DEMO scenarios (ready, switched/finished,
-unavailable, corrupt) and the captured `UI_EVIDENCE` output from the real
-components-panel runtime test that switches runs and presses refresh. The
-capture commands, the reversible window minimize/restore, and the still-frame
-limits are documented there.
+[`docs/evidence/`](docs/evidence/README.md) contains Orca-rendered screenshots
+of the isolated DEMO scenarios: topology, selected worker detail, the 细节 tab,
+finished, no workers, large worker counts, unavailable and corrupt. It also
+captures the `UI_EVIDENCE` output from the real components-panel runtime test
+that selects a worker, switches tabs and runs, and presses refresh. The capture
+commands, the reversible window minimize/restore, and the still-frame limits
+are documented there.
 
 Known limitation on the tested Orca 1.4.247 macOS bundle: `orca plugin types .`
 fails because the app bundle does not contain
