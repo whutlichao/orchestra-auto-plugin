@@ -8,6 +8,7 @@ import {
   finishedSummary,
   sampleListing,
   sampleFinishedView,
+  sampleRootsView,
   sampleView,
   unconfiguredListing,
   unavailableSummary
@@ -106,6 +107,12 @@ export default defineCheck({
     requests: {
       'runs.list': () => sampleListing,
       'run.get': () => smallView
+    }
+  },
+  'roots-stale': {
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => sampleRootsView
     }
   },
   branches: {

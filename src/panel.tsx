@@ -1,10 +1,13 @@
 // Read-only observatory panel for orchestra-auto runs.
 //
-// The main view is the recorded topology as a node-and-link graph: the run as a
-// coordinator card, workers linked only by parent_worker_id, each node showing
-// its name, task and status. Selecting a node expands its recorded facts inline;
-// attention and run details open on demand. Missing, invalid, cyclic, truncated,
-// stale and unavailable states stay explicit. Nothing is written or executed.
+// The main view is the recorded topology drawn as a node-and-link graph: a
+// coordinator hub over a spine, a dashed run-membership tick into each top-level
+// worker (two lanes), and solid elbows only for recorded parent_worker_id values.
+// A node shows its name, task and status; selecting it expands the recorded facts
+// full width under its lane pair. Stale is one run-level phrase, not a badge on
+// every node. Attention and run details open on demand. Missing, invalid, cyclic,
+// truncated, stale and unavailable states stay explicit. Nothing is written or
+// executed.
 import {
   Badge,
   Box,
@@ -30,7 +33,6 @@ import {
 } from 'orca'
 import {
   DELIVERY_FIELDS,
-  STALE_SECONDS,
   cleanText,
   recordedTaskId,
   type ArtifactView,
@@ -71,7 +73,14 @@ import {
   selectedRunId,
   selectedWorkerId
 } from './panel-state'
-import { planGraph, type GraphPlan, type GraphRow } from './graph'
+import {
+  planGraph,
+  planRunGraph,
+  type GraphPlan,
+  type GraphRow,
+  type MemberBlock,
+  type RunGraphPlan
+} from './graph'
 
 type Tone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
 
@@ -84,12 +93,21 @@ const WARNING_LIMIT = 6
 const ATTENTION_LIMIT = 10
 const DETACHED_TASK_LIMIT = 50
 const WORKER_ROW_LIMIT = 100
-// One rail cell per recorded ancestor level, plus the elbow into the node.
-const GRAPH_INDENT = 12
-// Where an elbow meets a node card: below its rounded corner, on the straight border.
-const GRAPH_TICK_Y = 12
-// Edge weight in the host's muted token: 2 px reads as a drawn link on both themes.
-const GRAPH_LINE = 2
+// The coordinator's spine: one lane tick per side plus the trunk itself.
+const SPINE_WIDTH = 28
+const SPINE_TICK_Y = 18
+const SPINE_DASH = 3
+const SPINE_GAP = 2
+// One rail cell per recorded ancestor level inside a lane, plus its elbow. A
+// small inset keeps a lane's branch rails visibly clear of the coordinator spine.
+const NEST_INDENT = 6
+const NEST_INSET = 4
+const NEST_TICK_Y = 18
+// The spine and its membership ticks are 2 px accent lines; recorded parent
+// edges are 1 px solid accent lines. Dashed/thicker vs solid/thinner keeps the
+// two edge kinds distinguishable without relying on colour alone.
+const LINE = 2
+const PARENT_LINE = 1
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {
   unknown: '未知',
@@ -206,16 +224,6 @@ const ERROR_TITLE: Record<string, string> = {
   timeout: '读取超时'
 }
 
-const RELATION_TONE: Record<WorkerRelation, Tone> = {
-  root: 'neutral',
-  child: 'neutral',
-  'missing-parent': 'warning',
-  'invalid-parent': 'warning',
-  'unresolved-parent': 'warning',
-  cycle: 'danger',
-  'depth-limit': 'warning'
-}
-
 function freshnessTone(freshness: Freshness): Tone {
   return freshness === 'stale' ? 'warning' : 'neutral'
 }
@@ -246,6 +254,11 @@ function summaryLabel(run: RunSummary | undefined): string {
 
 function errorTitle(error: { code: string }): string {
   return ERROR_TITLE[error.code] ?? '读取失败'
+}
+
+/** Show both numbers only when the render budget hid some top-level workers. */
+function memberCount(members: number, memberTotal: number): string {
+  return members === memberTotal ? String(members) : members + ' / ' + memberTotal
 }
 
 function TimeRow({ label, at }: { label: string; at: number | null }) {
@@ -279,35 +292,42 @@ function WarningLines({ lines }: { lines: string[] }) {
 
 const RELATION_DISPLAY: Record<
   WorkerRelation,
-  { badge: string; text: (parent: string) => string }
+  { badge: string; text: (parent: string) => string; tone: Tone }
 > = {
   root: {
     badge: '未记录父 Worker',
-    text: () => '未记录父 Worker（顶层行）'
+    text: () => '未记录父 Worker（运行归属连线）',
+    tone: 'neutral'
   },
   child: {
     badge: '父子关系已记录',
-    text: (parent) => '父 Worker ' + parent
+    text: (parent) => '父 Worker ' + parent,
+    tone: 'neutral'
   },
   'missing-parent': {
     badge: '父节点缺失',
-    text: (parent) => '父 ' + parent + ' 未记录'
+    text: (parent) => '父 ' + parent + ' 未记录',
+    tone: 'warning'
   },
   'invalid-parent': {
     badge: '父关系无效',
-    text: () => '父 Worker 记录无效'
+    text: () => '父 Worker 记录无效',
+    tone: 'warning'
   },
   'unresolved-parent': {
     badge: '父节点未读取',
-    text: (parent) => '父 ' + parent + ' 不在已读取的 Worker 中（可能因投影上限）'
+    text: (parent) => '父 ' + parent + ' 不在已读取的 Worker 中（可能因投影上限）',
+    tone: 'warning'
   },
   cycle: {
     badge: '父关系成环',
-    text: (parent) => '父关系成环（父 ' + parent + '）'
+    text: (parent) => '父关系成环（父 ' + parent + '）',
+    tone: 'danger'
   },
   'depth-limit': {
     badge: '层级过深',
-    text: (parent) => '层级过深，未继续缩进（父 ' + parent + '）'
+    text: (parent) => '层级过深，未继续缩进（父 ' + parent + '）',
+    tone: 'warning'
   }
 }
 
@@ -323,18 +343,16 @@ function relationText(node: TopologyWorker): string {
   return RELATION_DISPLAY[node.relation].text(node.parentId ?? '未记录')
 }
 
-function lifecycleTone(lifecycle: WorkerLifecycle): Tone {
-  switch (lifecycle) {
-    case 'running':
-      return 'accent'
-    case 'waiting_user':
-      return 'warning'
-    case 'failed':
-    case 'lost':
-      return 'danger'
-    default:
-      return 'neutral'
-  }
+const LIFECYCLE_TONE: Record<WorkerLifecycle, Tone> = {
+  unknown: 'neutral',
+  dispatched: 'neutral',
+  running: 'accent',
+  waiting_user: 'warning',
+  reported_done: 'neutral',
+  failed: 'danger',
+  lost: 'danger',
+  reclaimable: 'neutral',
+  closed: 'neutral'
 }
 
 /** A short recorded fact with the tone it should carry. */
@@ -360,18 +378,18 @@ function nodeBorder(node: TopologyWorker, selected: boolean): true | Tone {
   if (node.relation === 'cycle') return 'danger'
   if (node.worker.lifecycle === 'failed' || node.worker.lifecycle === 'lost') return 'danger'
   if (node.attention.length > 0) return 'warning'
-  if (node.worker.freshness === 'stale') return 'warning'
   return true
 }
 
-/** Recorded markers only: attention count, stale observation, unobserved start, relation gap. */
+/**
+ * Recorded markers only: attention count, unobserved start and a relation gap.
+ * Stale observation is a run-level fact, so it is deliberately not repeated
+ * here; the run summary states it once.
+ */
 function nodeMarkers(node: TopologyWorker): ToneLabel[] {
   const markers: ToneLabel[] = []
   if (node.attention.length > 0) {
     markers.push({ label: '需关注 ' + node.attention.length, tone: 'warning' })
-  }
-  if (node.worker.freshness === 'stale') {
-    markers.push({ label: '观测过期', tone: 'warning' })
   }
   if (node.worker.startConfirmation === 'unobserved') {
     markers.push({ label: '启动未观察', tone: 'warning' })
@@ -379,7 +397,7 @@ function nodeMarkers(node: TopologyWorker): ToneLabel[] {
   if (node.relation !== 'root' && node.relation !== 'child') {
     markers.push({
       label: RELATION_DISPLAY[node.relation].badge,
-      tone: RELATION_TONE[node.relation]
+      tone: RELATION_DISPLAY[node.relation].tone
     })
   }
   return markers
@@ -388,26 +406,30 @@ function nodeMarkers(node: TopologyWorker): ToneLabel[] {
 /**
  * One graph node: the worker's name, its recorded task and its status. The whole
  * card is the press target, so it is reachable and activatable from the keyboard.
+ * Only recorded trouble adds markers; the stale observation is a run-level fact
+ * and is stated once, not repeated on every node.
  */
 function WorkerNode({ node, selected }: { node: TopologyWorker; selected: boolean }) {
-  const markers = nodeMarkers(node)
   return (
-    <Box border={nodeBorder(node, selected)} radius="sm" background="card">
+    <Box border={nodeBorder(node, selected)} radius="sm" background="card" width="100%">
       <List label={'Worker ' + node.worker.id}>
         <ListItem
+          icon="bot"
           title={cleanText(node.worker.id, 60)}
+          description={cleanText(workerTaskText(node), 160)}
           current={selected}
           onPress={() => set(selectedWorkerId, selected ? '' : node.worker.id)}
         >
-          <Row gap="xs" align="center">
-            <Text size="xs" muted truncate>
-              {workerTaskText(node)}
-            </Text>
-            <Badge tone={lifecycleTone(node.worker.lifecycle)}>
+          <Row gap="xs" wrap align="center">
+            <Badge tone={LIFECYCLE_TONE[node.worker.lifecycle]}>
               {LIFECYCLE_LABEL[node.worker.lifecycle]}
             </Badge>
+            {nodeMarkers(node).map((marker, index) => (
+              <Badge key={index} tone={marker.tone}>
+                {marker.label}
+              </Badge>
+            ))}
           </Row>
-          <ToneBadges items={markers} />
         </ListItem>
       </List>
     </Box>
@@ -415,62 +437,30 @@ function WorkerNode({ node, selected }: { node: TopologyWorker; selected: boolea
 }
 
 /**
- * One planned graph row. Edges are drawn as real line segments in the host's
- * muted token: one rail cell per recorded ancestor whose trunk continues past
- * this row, then the elbow into the card. A top-level row has no incoming edge,
- * because no parent was recorded.
+ * The selected node's recorded facts, full width under its lane pair so a narrow
+ * lane never squeezes them. The close control duplicates the node press, which
+ * stays the primary toggle.
  */
-function WorkerNodeRow({ row, selectedId }: { row: GraphRow; selectedId: string }) {
-  const selected = row.node.worker.id === selectedId
-  const card = (
-    <Box direction="column" paddingY="xs" gap="sm">
-      <WorkerNode node={row.node} selected={selected} />
-      {row.cutChildren > 0 ? (
-        <Text muted size="xs">
-          {'还有 ' + row.cutChildren + ' 个下层 Worker 未显示'}
-        </Text>
-      ) : null}
-      {selected ? (
-        <Box direction="column" gap="xs">
-          <WorkerDetail node={row.node} />
-          <Text muted size="xs">
-            再次点击该节点收起详情。
+function SelectedDetail({ node, onClose }: { node: TopologyWorker; onClose: () => void }) {
+  return (
+    <Box border="accent" radius="sm" background="card" padding="sm" marginY="xs">
+      <Stack gap="sm">
+        <Row justify="between" align="center" gap="sm">
+          <Text size="sm" weight="medium">
+            {'Worker 详情 · ' + cleanText(node.worker.id, 60)}
           </Text>
-        </Box>
-      ) : null}
+          <IconButton
+            icon="close"
+            label="收起详情"
+            tooltip="收起该 Worker 的详情"
+            size="sm"
+            variant="ghost"
+            onPress={onClose}
+          />
+        </Row>
+        <WorkerDetail node={node} />
+      </Stack>
     </Box>
-  )
-  if (row.depth === 0) return card
-  return (
-    <Row align="stretch" gap="none">
-      {row.rails.map((active, index) => (
-        <Box key={'rail-' + index} width={GRAPH_INDENT} direction="row" align="stretch">
-          {active ? <Box width={GRAPH_LINE} background="muted" /> : null}
-        </Box>
-      ))}
-      <Box width={GRAPH_INDENT} direction="column" align="stretch">
-        <Box width={GRAPH_LINE} height={GRAPH_TICK_Y} background="muted" />
-        <Box width={GRAPH_INDENT} height={GRAPH_LINE} background="muted" />
-        {row.hasFollowingSibling ? (
-          <Box grow={true} direction="row" align="stretch" justify="start">
-            <Box width={GRAPH_LINE} background="muted" />
-          </Box>
-        ) : null}
-      </Box>
-      <Box grow={true} direction="column">
-        {card}
-      </Box>
-    </Row>
-  )
-}
-
-function WorkerGraph({ plan, selectedId }: { plan: GraphPlan; selectedId: string }) {
-  return (
-    <Stack gap="none">
-      {plan.rows.map((row) => (
-        <WorkerNodeRow key={'node:' + row.node.worker.id} row={row} selectedId={selectedId} />
-      ))}
-    </Stack>
   )
 }
 
@@ -517,9 +507,8 @@ function WorkerDetail({ node }: { node: TopologyWorker }) {
   ]
   return (
     <Stack gap="sm">
-      <Heading level={3}>Worker 详情</Heading>
       <Row gap="xs" wrap>
-        <Badge tone={RELATION_TONE[node.relation]}>
+        <Badge tone={RELATION_DISPLAY[node.relation].tone}>
           {RELATION_DISPLAY[node.relation].badge}
         </Badge>
         <Badge tone="neutral">{LIFECYCLE_LABEL[node.worker.lifecycle]}</Badge>
@@ -551,19 +540,42 @@ function WorkerDetail({ node }: { node: TopologyWorker }) {
   )
 }
 
-function CoordinatorNode({ view }: { view: RunView }) {
+/**
+ * The coordinator: the graph's hub. Its card is compact and centred over the
+ * spine, and the spine leaves from its bottom to join every member lane.
+ */
+function CoordinatorNode({
+  view,
+  members,
+  memberTotal
+}: {
+  view: RunView
+  members: number
+  memberTotal: number
+}) {
   return (
-    <Box border="accent" radius="sm" background="card" padding="sm" direction="column" gap="xs">
-      <Row justify="between" align="center" gap="sm">
-        <Text size="sm" weight="medium">
-          协调者
+    <Stack gap="none" align="center">
+      <Box
+        border="accent"
+        radius="sm"
+        background="card"
+        paddingX="sm"
+        paddingY="xs"
+        width="90%"
+        maxWidth={260}
+      >
+        <Row justify="between" align="center" gap="sm" wrap>
+          <Text size="sm" weight="medium" truncate>
+            协调者
+          </Text>
+          <Badge tone={RUN_STATUS_TONE[view.status]}>{RUN_STATUS_LABEL[view.status]}</Badge>
+        </Row>
+        <Text muted size="xs" truncate>
+          {'本运行 · ' + memberCount(members, memberTotal) + ' 个顶层 Worker'}
         </Text>
-        <Badge tone={RUN_STATUS_TONE[view.status]}>{RUN_STATUS_LABEL[view.status]}</Badge>
-      </Row>
-      <Text muted size="xs" truncate>
-        本运行
-      </Text>
-    </Box>
+      </Box>
+      {members > 0 ? <Box width={LINE} height={10} border="accent" /> : null}
+    </Stack>
   )
 }
 
@@ -587,33 +599,180 @@ function TopologyBadges({ topology }: { topology: Topology }) {
   return <ToneBadges items={markers} />
 }
 
-/** The graph of workers with no recorded parent: no edge is drawn into them. */
-function RootWorkerGraph({ plan, workerId }: { plan: GraphPlan; workerId: string }) {
-  if (plan.rows.length === 0) {
-    return (
-      <Text muted size="xs">
-        没有未记录父关系的顶层 Worker；其余记录见关系异常。
-      </Text>
-    )
-  }
+/**
+ * One dashed membership tick. Three short strokes read as a dashed line at both
+ * 280 px and a wide sidebar, and a dashed line is never mistaken for the solid
+ * recorded-parent edge.
+ */
+function MembershipTick() {
   return (
-    <Stack gap="xs">
-      <Row justify="between" align="center" gap="sm">
+    <Row gap="none" align="center">
+      {[0, 1, 2].map((index) => (
+        <Row key={index} gap="none" align="center">
+          {index > 0 ? <Box width={SPINE_GAP} height={LINE} /> : null}
+          <Box width={SPINE_DASH} height={LINE} border="accent" />
+        </Row>
+      ))}
+    </Row>
+  )
+}
+
+/**
+ * The coordinator's spine cell: the solid accent trunk plus a dashed tick into
+ * each occupied lane. The trunk stretches to the row's height, so consecutive
+ * rows read as one continuous spine.
+ */
+function SpineCell({ left, right }: { left: boolean; right: boolean }) {
+  return (
+    <Box width={SPINE_WIDTH} direction="row" align="stretch" gap="none">
+      <Box width={13} direction="column" align="stretch" gap="none">
+        <Box height={SPINE_TICK_Y} />
+        {left ? <MembershipTick /> : null}
+      </Box>
+      <Box width={LINE} border="accent" />
+      <Box width={13} direction="column" align="stretch" gap="none">
+        <Box height={SPINE_TICK_Y} />
+        {right ? <MembershipTick /> : null}
+      </Box>
+    </Box>
+  )
+}
+
+/**
+ * One planned row of recorded worker edges: solid accent rails, one cell per
+ * recorded ancestor whose trunk continues past this row, then the elbow into
+ * the card. A row whose parent was not recorded never reaches this renderer.
+ */
+function RecordedNodeRow({ row, selectedId }: { row: GraphRow; selectedId: string }) {
+  const selected = row.node.worker.id === selectedId
+  const card = (
+    <Box direction="column" paddingY="xs" gap="sm">
+      <WorkerNode node={row.node} selected={selected} />
+      {row.cutChildren > 0 ? (
         <Text muted size="xs">
-          顶层 Worker · 未记录父关系
-        </Text>
-        {plan.truncated ? (
-          <Text muted size="xs">
-            {plan.shown + ' / ' + plan.total}
-          </Text>
-        ) : null}
-      </Row>
-      <WorkerGraph plan={plan} selectedId={workerId} />
-      {plan.truncated ? (
-        <Text muted size="xs">
-          图中仅显示前 {WORKER_ROW_LIMIT} 个 Worker（含嵌套行），共 {plan.total} 个。
+          {'还有 ' + row.cutChildren + ' 个下层 Worker 未显示'}
         </Text>
       ) : null}
+    </Box>
+  )
+  if (row.depth === 0) return card
+  return (
+    <Row align="stretch" gap="none">
+      <Box width={NEST_INSET} />
+      {row.rails.map((active, index) => (
+        <Box key={'rail-' + index} width={NEST_INDENT} direction="row" align="stretch">
+          {active ? <Box width={PARENT_LINE} border="accent" /> : null}
+        </Box>
+      ))}
+      <Box width={NEST_INDENT} direction="column" align="stretch">
+        <Box width={PARENT_LINE} height={NEST_TICK_Y} border="accent" />
+        <Box width={NEST_INDENT} height={PARENT_LINE} border="accent" />
+        {row.hasFollowingSibling ? (
+          <Box grow={true} direction="row" align="stretch" justify="start">
+            <Box width={PARENT_LINE} border="accent" />
+          </Box>
+        ) : null}
+      </Box>
+      <Box grow={true} direction="column">
+        {card}
+      </Box>
+    </Row>
+  )
+}
+
+/** One top-level worker and its recorded subtree, drawn inside one lane. */
+function MemberLane({ block, selectedId }: { block: MemberBlock; selectedId: string }) {
+  return (
+    <Box direction="column" gap="none" width="100%">
+      <WorkerNode node={block.node} selected={block.node.worker.id === selectedId} />
+      {block.children.length > 0 ? (
+        <Stack gap="none">
+          {block.children.map((row) => (
+            <RecordedNodeRow key={'child:' + row.node.worker.id} row={row} selectedId={selectedId} />
+          ))}
+        </Stack>
+      ) : null}
+      {block.cutChildren > 0 ? (
+        <Text muted size="xs">
+          {'还有 ' + block.cutChildren + ' 个下层 Worker 未显示'}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+function blockHasWorker(block: MemberBlock | null, workerId: string): boolean {
+  if (block === null) return false
+  return (
+    block.node.worker.id === workerId ||
+    block.children.some((row) => row.node.worker.id === workerId)
+  )
+}
+
+/** Every worker ID a member block draws, including its recorded children. */
+function memberNodeIds(block: MemberBlock | null): string[] {
+  if (block === null) return []
+  return [block.node.worker.id, ...block.children.map((row) => row.node.worker.id)]
+}
+
+/**
+ * One lane pair around the spine. The selected node's detail is drawn full width
+ * under the pair, so a lane's narrow width never squeezes the recorded facts.
+ */
+function MembershipRow({
+  row,
+  selectedNode
+}: {
+  row: RunGraphPlan['rows'][number]
+  selectedNode: TopologyWorker | null
+}) {
+  const selectedId = selectedNode?.worker.id ?? ''
+  const showDetail =
+    selectedNode !== null &&
+    (blockHasWorker(row.left, selectedNode.worker.id) ||
+      blockHasWorker(row.right, selectedNode.worker.id))
+  return (
+    <Stack gap="none">
+      <Row align="stretch" gap="none" justify="center">
+        <Box grow={true} width={0} minWidth={0} direction="column" align="end" paddingY="xs">
+          {row.left ? <MemberLane block={row.left} selectedId={selectedId} /> : null}
+        </Box>
+        <SpineCell left={row.left !== null} right={row.right !== null} />
+        <Box grow={true} width={0} minWidth={0} direction="column" align="start" paddingY="xs">
+          {row.right ? <MemberLane block={row.right} selectedId={selectedId} /> : null}
+        </Box>
+      </Row>
+      {showDetail && selectedNode !== null ? (
+        <SelectedDetail node={selectedNode} onClose={() => set(selectedWorkerId, '')} />
+      ) : null}
+    </Stack>
+  )
+}
+
+/**
+ * The run graph: coordinator hub, spine, and one dashed membership edge per
+ * top-level worker. Members are paired into two lanes so the graph stays compact
+ * in a narrow sidebar; recorded parent edges stay solid and inside their lane.
+ */
+function MembershipGraph({
+  view,
+  plan,
+  selectedNode
+}: {
+  view: RunView
+  plan: RunGraphPlan
+  selectedNode: TopologyWorker | null
+}) {
+  return (
+    <Stack gap="none">
+      <CoordinatorNode
+        view={view}
+        members={plan.members}
+        memberTotal={plan.memberTotal}
+      />
+      {plan.rows.map((row, index) => (
+        <MembershipRow key={'pair:' + index} row={row} selectedNode={selectedNode} />
+      ))}
     </Stack>
   )
 }
@@ -622,11 +781,11 @@ function RootWorkerGraph({ plan, workerId }: { plan: GraphPlan; workerId: string
 function AnomalyGroup({
   topology,
   plan,
-  workerId
+  selectedId
 }: {
   topology: Topology
   plan: GraphPlan
-  workerId: string
+  selectedId: string
 }) {
   const cyclePresent = topology.anomalies.some((each) => each.relation === 'cycle')
   const tone: Tone = cyclePresent ? 'danger' : 'warning'
@@ -639,15 +798,24 @@ function AnomalyGroup({
         <Badge tone={tone}>未并入协调者</Badge>
       </Row>
       <Text muted size="xs">
-        父节点缺失、无效、未读取或成环；这些 Worker 不会并入协调者，也不画父连线。
+        父节点缺失、无效、未读取或成环；这些 Worker 不并入协调者，因此没有运行归属连线。
         {topology.depthLimited > 0
           ? ' 其中 ' + topology.depthLimited + ' 个因层级过深而平铺。'
           : ''}
       </Text>
-      <WorkerGraph plan={plan} selectedId={workerId} />
+      <Stack gap="none">
+        {plan.rows.map((row) => (
+          <Stack key={'anomaly:' + row.node.worker.id} gap="none">
+            <RecordedNodeRow row={row} selectedId={selectedId} />
+            {row.node.worker.id === selectedId ? (
+              <SelectedDetail node={row.node} onClose={() => set(selectedWorkerId, '')} />
+            ) : null}
+          </Stack>
+        ))}
+      </Stack>
       {plan.truncated ? (
         <Text muted size="xs">
-          关系异常中仅显示前 {WORKER_ROW_LIMIT} 个 Worker（含嵌套行），共 {plan.total} 个。
+          关系异常中仅显示前 {WORKER_ROW_LIMIT} 个 Worker（含嵌套节点），共 {plan.total} 个。
         </Text>
       ) : null}
     </Box>
@@ -710,11 +878,11 @@ function TopologySection({
     )
   }
 
-  const rootPlan = planGraph(topology.roots, WORKER_ROW_LIMIT)
+  const rootPlan = planRunGraph(topology.roots, WORKER_ROW_LIMIT)
   const anomalyPlan = planGraph(topology.anomalies, WORKER_ROW_LIMIT)
   const node = workerId ? topologyNode(topology, workerId) : null
   const shownIds = new Set([
-    ...rootPlan.rows.map((row) => row.node.worker.id),
+    ...rootPlan.rows.flatMap((row) => [row.left, row.right]).flatMap(memberNodeIds),
     ...anomalyPlan.rows.map((row) => row.node.worker.id)
   ])
   return (
@@ -727,28 +895,59 @@ function TopologySection({
           </Text>
         </Callout>
       ) : null}
-      <CoordinatorNode view={view} />
-      <RootWorkerGraph plan={rootPlan} workerId={workerId} />
+      <Stack gap="xs">
+        <Row justify="between" align="center" gap="sm">
+          <Text muted size="xs">
+            {'运行归属图 · ' +
+              memberCount(rootPlan.members, rootPlan.memberTotal) +
+              (rootPlan.members === rootPlan.memberTotal ? ' 个顶层 Worker' : ' 顶层')}
+          </Text>
+          {rootPlan.truncated ? (
+            <Text muted size="xs">
+              {rootPlan.shown + ' / ' + rootPlan.total + ' 节点'}
+            </Text>
+          ) : null}
+        </Row>
+        <MembershipGraph view={view} plan={rootPlan} selectedNode={node} />
+        {rootPlan.rows.length === 0 ? (
+          <Text muted size="xs">
+            没有未记录父关系的顶层 Worker；其余记录见关系异常。
+          </Text>
+        ) : null}
+        <Text muted size="xs">
+          虚线＝运行归属（协调者 → 顶层 Worker）；实线＝已记录父 Worker；未记录的关系不推断。
+        </Text>
+        <Collapsible title="图例与说明" description="连线的边界与节点交互">
+          <Stack gap="xs">
+            <Text size="xs">
+              运行归属不是父子关系，也不会推断 Worker 之间的归属；父节点缺失、无效、未读取或成环的 Worker 列在“关系异常”。
+            </Text>
+            <Text size="xs">
+              观测过期只说明快照未更新，不改变任何节点状态。点击节点（或键盘回车/空格）查看完整记录；再次点击或按“收起详情”关闭。
+            </Text>
+          </Stack>
+        </Collapsible>
+        {rootPlan.truncated ? (
+          <Text muted size="xs">
+            图中仅显示前 {WORKER_ROW_LIMIT} 个 Worker（含嵌套节点），共 {rootPlan.total} 个。
+          </Text>
+        ) : null}
+      </Stack>
       {topology.anomalies.length > 0 ? (
-        <AnomalyGroup topology={topology} plan={anomalyPlan} workerId={workerId} />
+        <AnomalyGroup topology={topology} plan={anomalyPlan} selectedId={workerId} />
       ) : null}
       {topology.detachedTasks.length > 0 ? (
         <DetachedTasks tasks={topology.detachedTasks} />
       ) : null}
-      {node === null ? (
-        <Text muted size="xs">点击图中的 Worker 节点查看任务、关系与生命周期。</Text>
-      ) : shownIds.has(node.worker.id) ? null : (
+      {node === null ? null : shownIds.has(node.worker.id) ? null : (
         <Stack gap="sm">
           <Separator />
           <Text muted size="xs">
             该 Worker 不在当前显示的图中（可能被行数上限截断）。
           </Text>
-          <WorkerDetail node={node} />
+          <SelectedDetail node={node} onClose={() => set(selectedWorkerId, '')} />
         </Stack>
       )}
-      <Text muted size="xs">
-        连线只表示已记录的 parent_worker_id；未记录父 Worker 的节点在顶层且不画父连线，缺失、无效、未读取或成环的关系不会被推断归属。
-      </Text>
     </Stack>
   )
 }
@@ -1109,9 +1308,10 @@ function RunHeader({
   observedAt: number | null
 }) {
   const status = view?.status ?? summary?.status ?? 'unknown'
+  const freshness = view?.freshness ?? 'unknown'
   const badges = runBadges({
     mode: view?.mode ?? summary?.mode ?? 'unknown',
-    freshness: view?.freshness ?? 'unknown',
+    freshness,
     health: view?.health ?? summary?.health ?? 'unknown',
     availability: summary?.availability ?? 'available'
   })
@@ -1136,6 +1336,11 @@ function RunHeader({
           <RelativeTime at={observedAt} muted />
         )}
         <ToneBadges items={badges} />
+        {freshness === 'stale' ? (
+          <Text muted size="xs">
+            过期≠失败，也不代表没有进展
+          </Text>
+        ) : null}
       </Row>
     </Stack>
   )
@@ -1235,11 +1440,6 @@ export default function Panel() {
             {currentDetail?.mode === 'DEMO' ? (
               <Text size="xs" tone="warning">
                 DEMO 示例数据，不代表真实执行或验收。
-              </Text>
-            ) : null}
-            {currentDetail?.freshness === 'stale' ? (
-              <Text size="xs" tone="warning">
-                最近观测已超过 {Math.round(STALE_SECONDS / 60)} 分钟；过期不等于失败，也不代表没有进展。
               </Text>
             ) : null}
             {currentDetail && currentDetail.warnings.length > 0 ? (

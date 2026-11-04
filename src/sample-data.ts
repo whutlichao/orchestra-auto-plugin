@@ -210,7 +210,6 @@ export const sampleView: RunView = {
   events: [
     {
       index: 4,
-      id: 'event-4',
       at: observed,
       type: 'worker',
       source: 'coordinator',
@@ -219,7 +218,6 @@ export const sampleView: RunView = {
     },
     {
       index: 3,
-      id: 'event-3',
       at: observed - 60_000,
       type: 'delivery',
       source: 'coordinator',
@@ -228,7 +226,6 @@ export const sampleView: RunView = {
     },
     {
       index: 2,
-      id: 'event-2',
       at: observed - 120_000,
       type: 'event',
       source: 'coordinator',
@@ -237,7 +234,6 @@ export const sampleView: RunView = {
     },
     {
       index: 1,
-      id: 'event-1',
       at: started,
       type: 'init',
       source: 'coordinator',
@@ -326,6 +322,98 @@ export const sampleFinishedView: RunView = {
       parentState: parentId ? ('recorded' as const) : ('none' as const)
     }
   }),
+  attention: [],
+  attentionTotal: 0,
+  warnings: []
+}
+
+/**
+ * Six top-level workers with no recorded parent and a stale snapshot.
+ *
+ * This is the shape of the panel report this fixture guards: the run had six
+ * workers and only a run-level stale observation, and the panel drew six stacked
+ * full-width cards with the stale badge repeated on each of them. The graph now
+ * has to join each of the six to the coordinator without inventing a parent, and
+ * state the stale observation once.
+ */
+export const sampleRootsView: RunView = {
+  ...sampleView,
+  title: '示例：六个顶层 Worker',
+  status: 'completed',
+  health: 'healthy',
+  phase: 'done',
+  freshness: 'stale',
+  endedAt: observed,
+  tasks: [
+    task('t-m1-impl', 'M1 实施：票图与面板', 'running'),
+    task('t-m1-spec', 'M1 规格：契约与 ADR', 'running'),
+    task('t-m2-impl', 'M2 实施：票图与集成 PR', 'reported'),
+    task('t-m2-spec', 'M2 规格：流程与权限', 'running'),
+    task('t-m2-tickets', 'M2 拆票：拆到可执行票', 'running'),
+    task('t-m1-tickets', 'M1 拆票：实现票图', 'running')
+  ],
+  taskCounts: {
+    unknown: 0,
+    pending: 0,
+    ready: 0,
+    running: 5,
+    blocked: 0,
+    waiting_user: 0,
+    reported: 1,
+    accepted: 0,
+    rejected: 0,
+    failed: 0,
+    paused: 0,
+    cancelled: 0,
+    total: 6
+  },
+  workerTotal: 6,
+  workers: [
+    worker('w-impl-a1', 't-m1-impl', {
+      lifecycle: 'running',
+      lastObservedAt: staleObserved,
+      freshness: 'stale'
+    }),
+    worker('w-spec-a1', 't-m1-spec', {
+      lifecycle: 'running',
+      lastObservedAt: staleObserved,
+      freshness: 'stale'
+    }),
+    worker('w-m2-impl', 't-m2-impl', {
+      lifecycle: 'reported_done',
+      reportedLifecycle: 'reported_done',
+      lastObservedAt: staleObserved,
+      freshness: 'stale'
+    }),
+    worker('w-m2-spec', 't-m2-spec', {
+      lifecycle: 'running',
+      lastObservedAt: staleObserved,
+      freshness: 'stale'
+    }),
+    worker('w-m2-tickets', 't-m2-tickets', {
+      lifecycle: 'running',
+      lastObservedAt: staleObserved,
+      freshness: 'stale'
+    }),
+    worker('w-tickets-a1', 't-m1-tickets', {
+      lifecycle: 'running',
+      lastObservedAt: staleObserved,
+      freshness: 'stale'
+    })
+  ],
+  deliveries: [],
+  deliveryTotal: 0,
+  deliveryCounts: {
+    implemented: { yes: 0, no: 0, unverified: 0 },
+    integrated: { yes: 0, no: 0, unverified: 0 },
+    merged: { yes: 0, no: 0, unverified: 0 },
+    tracker_closed: { yes: 0, no: 0, unverified: 0 }
+  },
+  deliveryMissingTasks: 6,
+  artifacts: [],
+  artifactTotal: 0,
+  events: [],
+  eventTotal: 0,
   attention: [],
   attentionTotal: 0,
   warnings: []
