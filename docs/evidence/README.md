@@ -6,37 +6,43 @@ shown.
 
 ## Rendered screenshots
 
-Captured on 2026-11-03 with Orca 1.4.247 on macOS, panel width 336 px, current
-(dark) theme. The Orca window was minimized for the capture and restored
+Captured on 2026-11-04 with Orca 1.4.247 on macOS, panel width 336 px, current
+(dark) theme. The Orca window was minimized for the captures and restored
 immediately afterwards. The plugin was **not** loaded into the sidebar, enabled,
 or approved.
 
 ```sh
 # window minimized via the accessibility tree; restored after the captures
-orca plugin shot . --scenario ready       --out /tmp/orca-ui2-ready.png --json
-orca plugin shot . --scenario finished    --out /tmp/orca-ui2-finished.png --json
-orca plugin shot . --scenario unavailable --out /tmp/orca-ui2-unavailable.png --json
-orca plugin shot . --scenario corrupt     --out /tmp/orca-ui2-corrupt.png --json
+orca plugin shot . --scenario ready         --width 336 --theme dark --out docs/evidence/orca-ui-ready.png --json
+orca plugin shot . --scenario worker        --width 336 --theme dark --out docs/evidence/orca-ui-worker.png --json
+orca plugin shot . --scenario details       --width 336 --theme dark --out docs/evidence/orca-ui-details.png --json
+orca plugin shot . --scenario finished      --width 336 --theme dark --out docs/evidence/orca-ui-finished.png --json
+orca plugin shot . --scenario no-workers    --width 336 --theme dark --out docs/evidence/orca-ui-no-workers.png --json
+orca plugin shot . --scenario large-workers --width 336 --theme dark --out docs/evidence/orca-ui-large-workers.png --json
+orca plugin shot . --scenario unavailable   --width 336 --theme dark --out docs/evidence/orca-ui-unavailable.png --json
+orca plugin shot . --scenario corrupt       --width 336 --theme dark --out docs/evidence/orca-ui-corrupt.png --json
 ```
 
 `--scenario` runs the panel and worker against a stand-in host and draws the
 resulting tree in Orca's window; it does not open the plugin's sidebar or
-approve it. `--json` reported `ok: true`, `settled: true`, `errors: []` and
-`replay: true` for all four captures.
+approve it. `--json` reported `ok: true`, `settled: true` and `errors: []` for
+all eight captures.
 
 | File | Shows |
 | --- | --- |
-| `orca-ui-ready.png` | Active DEMO run: selector, status/health/freshness badges, DEMO and health warnings, attention list, delivery facts. |
-| `orca-ui-finished.png` | Finished DEMO run: completed status, healthy/current badges, empty attention, delivery facts, collapsed recent-events section. The interaction test switches to this same run in the real runtime. |
+| `orca-ui-ready.png` | Default topology tab: coordinator, direct and nested workers, task/status/attention rows, the 关系异常 group with a missing and an invalid parent, and the detached-task group. |
+| `orca-ui-worker.png` | A selected worker expands its detail inline: task, relation, dispatch, attempt, verified and self-reported lifecycle, start confirmation, freshness, worktree basename and self-report. |
+| `orca-ui-details.png` | The 细节 tab: run metadata, task counts/table, delivery facts, artifacts and the collapsed events section. |
+| `orca-ui-finished.png` | A completed DEMO run with a clean recorded hierarchy, empty attention and no relationship anomalies. |
+| `orca-ui-no-workers.png` | Empty topology: "没有 Worker 记录" explicitly says this is not proof that no execution happened. |
+| `orca-ui-large-workers.png` | 120 recorded workers: true totals in badges, a visible bounded-list notice and the first 100 root-tree rows. |
 | `orca-ui-unavailable.png` | Missing state: unavailable badge, "运行不可用", `progress.json` missing/unreadable message, retry control. |
 | `orca-ui-corrupt.png` | Corrupt snapshot: "快照损坏", invalid-JSON message, retry control. |
-| `orca-ui-ready-before-fix.png` | The first capture, before the UI fix: the delivery summary column was squeezed to unreadable glyphs and the fifth tab overflowed the 336 px sidebar. |
+| `orca-ui-ready-before-fix.png` | Historical pre-topology layout, kept only for comparison with the earlier five-tab design. |
 
-The first capture exposed two real narrow-sidebar defects: the delivery summary
-table's first column was compressed by the three numeric columns, and the five
-tabs overflowed the sidebar. The fix uses a `KeyValue` delivery summary (so all
-four facts and counts are readable) and four tabs with the events moved into a
-collapsed section in the Overview. The `before-fix` image is kept for comparison.
+The screenshots at 336 px show the intended narrow-sidebar behaviour: the
+topology is a wrapping row list, the two tabs fit, and the task/delivery tables
+drop wide columns while keeping their identifying and status columns.
 
 ## Interaction evidence
 
@@ -45,13 +51,19 @@ Driving the live panel with `--act` would require loading/approving the plugin,
 which is out of scope here. The real controls are instead exercised in Orca's
 own components-panel runtime by `src/panel.evidence.test.tsx`:
 
-- select the second run (`demo-active` -> `demo-finished`);
-- press the refresh control and assert a second `runs.list`;
+- assert the coordinator/topology render;
+- select `w-panel-a1` and assert the inline **Worker 详情**;
+- switch to the 细节 tab and assert run metadata;
+- switch back, select the finished run, and press refresh while asserting a
+  second `runs.list`;
 - mount the unavailable and corrupt scenarios and assert their error callouts.
 
 `orca plugin test .` prints the rendered summaries as `UI_EVIDENCE ...` lines;
 the captured output is in `ui-interaction-evidence.txt`. The same suite reports
-33/33 passing tests.
+51/51 passing tests, and `orca plugin check .` renders thirteen scenarios
+(`unconfigured`, `empty`, `ready`, `finished`, `worker`, `anomaly`, `details`,
+`cycle`, `no-workers`, `large-workers`, `stale`, `unavailable`, `corrupt`) with
+no panel errors or dropped props.
 
 ## Limits
 
@@ -61,4 +73,6 @@ the captured output is in `ui-interaction-evidence.txt`. The same suite reports
 - Orca's window must be minimized or hidden for a scenario shot. The capture
   used a reversible minimize/restore via the macOS accessibility API; the
   window's prior state was restored.
-- The screenshots show the current dark theme; no `--theme` override was used.
+- The screenshots show the current dark theme; no live theme override was used.
+- The large-worker still frame shows the top of a bounded list, not all 100
+  rows; the true total and the truncation notice are visible above the rows.

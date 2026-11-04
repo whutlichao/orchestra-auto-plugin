@@ -1,9 +1,9 @@
 // Read-only observatory panel for orchestra-auto runs.
 //
-// The panel never writes run state and never calls an orchestration action. It
-// asks its own worker for a listing and one projected snapshot, then renders
-// only recorded facts. Missing, stale, corrupt and unavailable states are
-// rendered as such; a missing delivery is never shown as success.
+// The default view is the recorded topology: the run as coordinator, workers
+// linked only by parent_worker_id, their task association, status and recorded
+// attention. Missing, invalid, cyclic and truncated relations stay explicit.
+// Secondary facts live behind the "细节" tab; nothing is written or executed.
 import {
   Badge,
   Button,
@@ -30,6 +30,7 @@ import {
   DELIVERY_FIELDS,
   STALE_SECONDS,
   cleanText,
+  recordedTaskId,
   type ArtifactView,
   type DeliveryField,
   type EventView,
@@ -48,6 +49,13 @@ import {
   type WorkerLifecycle
 } from './contract'
 import {
+  buildTopology,
+  topologyNode,
+  type Topology,
+  type TopologyWorker,
+  type WorkerRelation
+} from './topology'
+import {
   detail,
   detailError,
   detailLoading,
@@ -57,7 +65,8 @@ import {
   refresh,
   selectRun,
   selectedRunId,
-  selectedTab
+  selectedTab,
+  selectedWorkerId
 } from './panel-state'
 
 type Tone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
@@ -65,11 +74,12 @@ type Tone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
 export { setup } from './panel-state'
 
 const TASK_LIMIT = 100
-const WORKER_LIMIT = 100
 const DELIVERY_LIMIT = 100
 const ARTIFACT_LIMIT = 50
 const WARNING_LIMIT = 6
-const ATTENTION_LIMIT = 20
+const ATTENTION_LIMIT = 10
+const DETACHED_TASK_LIMIT = 50
+const WORKER_ROW_LIMIT = 100
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {
   unknown: '未知',
@@ -192,6 +202,16 @@ const ERROR_TITLE: Record<string, string> = {
   timeout: '读取超时'
 }
 
+const RELATION_TONE: Record<WorkerRelation, Tone> = {
+  root: 'neutral',
+  child: 'neutral',
+  'missing-parent': 'warning',
+  'invalid-parent': 'warning',
+  'unresolved-parent': 'warning',
+  cycle: 'danger',
+  'depth-limit': 'warning'
+}
+
 function freshnessTone(freshness: Freshness): Tone {
   return freshness === 'stale' ? 'warning' : 'neutral'
 }
@@ -253,55 +273,78 @@ function WarningLines({ lines }: { lines: string[] }) {
   )
 }
 
-function Overview({ view }: { view: RunView }) {
-  const overviewItems = [
-    { label: '运行 ID', value: view.id, code: true },
-    { label: 'Orca Run ID', value: view.orcaRunId ?? '未记录', code: view.orcaRunId !== null },
-    { label: '模式', value: MODE_LABEL[view.mode] },
-    { label: '阶段', value: view.phase || '未记录' },
-    { label: 'Schema', value: 'v' + view.schemaVersion },
-    { label: '来源', value: SOURCE_LABEL[view.source] }
-  ]
-  const deliveryItems = DELIVERY_FIELDS.map((field) => {
-    const count = view.deliveryCounts[field]
-    return {
-      label: DELIVERY_LABEL[field],
-      value: '是 ' + count.yes + ' · 否 ' + count.no + ' · 未核验 ' + count.unverified
-    }
-  })
+const RELATION_DISPLAY: Record<
+  WorkerRelation,
+  { badge: string; text: (parent: string) => string }
+> = {
+  root: {
+    badge: '未记录父 Worker',
+    text: () => '未记录父 Worker（顶层行）'
+  },
+  child: {
+    badge: '父子关系已记录',
+    text: (parent) => '父 Worker ' + parent
+  },
+  'missing-parent': {
+    badge: '父节点缺失',
+    text: (parent) => '父 ' + parent + ' 未记录'
+  },
+  'invalid-parent': {
+    badge: '父关系无效',
+    text: () => '父 Worker 记录无效'
+  },
+  'unresolved-parent': {
+    badge: '父节点未读取',
+    text: (parent) => '父 ' + parent + ' 不在已读取的 Worker 中（可能因投影上限）'
+  },
+  cycle: {
+    badge: '父关系成环',
+    text: (parent) => '父关系成环（父 ' + parent + '）'
+  },
+  'depth-limit': {
+    badge: '层级过深',
+    text: (parent) => '层级过深，未继续缩进（父 ' + parent + '）'
+  }
+}
+
+function workerTaskText(node: TopologyWorker): string {
+  if (node.task) return node.task.title
+  const taskId = recordedTaskId(node.worker)
+  if (taskId !== null) return taskId + '（未记录于 tasks）'
+  if (node.worker.taskState === 'invalid') return '记录无效'
+  return '未记录'
+}
+
+function relationText(node: TopologyWorker): string {
+  return RELATION_DISPLAY[node.relation].text(node.parentId ?? '未记录')
+}
+
+function lifecycleTone(lifecycle: WorkerLifecycle): Tone {
+  switch (lifecycle) {
+    case 'running':
+      return 'accent'
+    case 'waiting_user':
+      return 'warning'
+    case 'failed':
+    case 'lost':
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}
+
+type TopologyRow = { node: TopologyWorker; depth: number }
+
+function flattenRows(nodes: TopologyWorker[], depth: number, output: TopologyRow[]): void {
+  for (const node of nodes) {
+    output.push({ node, depth })
+    flattenRows(node.children, depth + 1, output)
+  }
+}
+
+function AttentionSection({ view }: { view: RunView }) {
   return (
-    <Stack gap="md">
-      {view.mode === 'DEMO' ? (
-        <Callout tone="warning" title="DEMO 数据">
-          <Text size="xs">该运行标记为 DEMO；示例数据不代表真实执行或验收。</Text>
-        </Callout>
-      ) : null}
-      <KeyValue items={overviewItems} />
-      {view.summary ? <Text size="sm">{view.summary}</Text> : null}
-      <Stack gap="xs">
-        <TimeRow label="最近观测" at={view.lastObservedAt} />
-        <TimeRow label="最近有效进展" at={view.lastEffectiveProgressAt} />
-        <TimeRow label="开始" at={view.startedAt} />
-        <TimeRow label="结束" at={view.endedAt} />
-      </Stack>
-      {view.freshness === 'stale' ? (
-        <Callout tone="warning" title="观测已过期">
-          <Text size="xs">
-            最近观测已超过 {Math.round(STALE_SECONDS / 60)} 分钟；过期不等于失败。
-          </Text>
-        </Callout>
-      ) : null}
-      {view.health === 'degraded' || view.health === 'blocked' || view.health === 'lost' ? (
-        <Callout tone={view.health === 'lost' ? 'danger' : 'warning'} title="运行健康">
-          <Text size="xs">记录的健康状态：{HEALTH_LABEL[view.health]}。</Text>
-        </Callout>
-      ) : null}
-      {view.warnings.length > 0 ? (
-        <Callout tone="warning" title="快照提示">
-          <WarningLines lines={view.warnings} />
-        </Callout>
-      ) : null}
-      <Separator />
+    <Stack gap="xs">
       <Heading level={3}>需要关注</Heading>
       {view.attention.length === 0 ? (
         <Text muted size="xs">
@@ -321,26 +364,320 @@ function Overview({ view }: { view: RunView }) {
           ) : null}
         </Stack>
       )}
-      <Separator />
-      <Heading level={3}>交付事实</Heading>
-      <KeyValue items={deliveryItems} />
-      <Text muted size="xs">
-        只有严格 true/false 才是已核验；null 或缺失为未核验。没有 delivery 不代表成功。
-      </Text>
-      <Text muted size="xs">
-        未记录交付的任务：{view.deliveryMissingTasks}（不等于成功）。
-      </Text>
-      <Collapsible
-        title="最近事件"
-        description={'共 ' + view.eventTotal + ' 条，显示最近 ' + view.events.length + ' 条'}
-      >
-        <Events view={view} />
-      </Collapsible>
     </Stack>
   )
 }
 
-function Tasks({ view }: { view: RunView }) {
+function WorkerDetail({ node }: { node: TopologyWorker }) {
+  const items = [
+    { label: 'Worker', value: node.worker.id, code: true },
+    { label: '任务', value: workerTaskText(node) },
+    { label: '关系', value: relationText(node) },
+    { label: 'Dispatch', value: node.worker.dispatchId ?? '未记录', code: node.worker.dispatchId !== null },
+    { label: '尝试', value: node.worker.attempt ?? '未知' },
+    ...(node.descendantCount > 0
+      ? [{ label: '下属 Worker', value: node.descendantCount }]
+      : []),
+    { label: '核验生命周期', value: LIFECYCLE_LABEL[node.worker.lifecycle] },
+    { label: '自报生命周期', value: LIFECYCLE_LABEL[node.worker.reportedLifecycle] },
+    { label: '启动确认', value: START_LABEL[node.worker.startConfirmation] },
+    { label: '时效', value: FRESHNESS_LABEL[node.worker.freshness] },
+    { label: '工作区', value: node.worker.worktree || '未记录' },
+    { label: '自报摘要', value: node.worker.reportedSummary || '未记录' }
+  ]
+  return (
+    <Stack gap="sm">
+      <Heading level={3}>Worker 详情</Heading>
+      <Row gap="xs" wrap>
+        <Badge tone={RELATION_TONE[node.relation]}>
+          {RELATION_DISPLAY[node.relation].badge}
+        </Badge>
+        <Badge tone="neutral">{LIFECYCLE_LABEL[node.worker.lifecycle]}</Badge>
+        {node.worker.freshness === 'stale' ? <Badge tone="warning">观测已过期</Badge> : null}
+        {node.worker.startConfirmation === 'unobserved' ? (
+          <Badge tone="warning">启动未观察到</Badge>
+        ) : null}
+      </Row>
+      <KeyValue items={items} />
+      {node.attention.length > 0 ? (
+        <Callout tone="warning" title="该 Worker 需要关注">
+          <Stack gap="xs">
+            {node.attention.map((item) => (
+              <Text key={item.id} size="xs">
+                • {item.text}
+              </Text>
+            ))}
+          </Stack>
+        </Callout>
+      ) : (
+        <Text muted size="xs">
+          没有记录到该 Worker 或其任务的问题。
+        </Text>
+      )}
+      <Text muted size="xs">
+        自报不等于验收；关系与任务只来自记录字段，未记录的值不会被推断。
+      </Text>
+    </Stack>
+  )
+}
+
+function WorkerRow({
+  row,
+  selected
+}: {
+  row: TopologyRow
+  selected: boolean
+}) {
+  const node = row.node
+  const indentation =
+    row.depth === 0
+      ? ''
+      : row.depth <= 4
+        ? '↳'.repeat(row.depth)
+        : '↳↳↳↳+' + (row.depth - 4)
+  const task =
+    '任务：' +
+    workerTaskText(node) +
+    (node.task ? '（' + TASK_STATUS_LABEL[node.task.status] + '）' : '')
+  const relation =
+    row.depth > 0 || node.relation === 'child'
+      ? '父 ' + (node.parentId ?? '未记录')
+      : node.relation === 'root'
+        ? ''
+        : relationText(node)
+  return (
+    <Stack gap="xs">
+      <Row gap="xs" wrap align="center">
+        {indentation ? (
+          <Text muted size="xs">
+            {indentation}
+          </Text>
+        ) : null}
+        <Button
+          size="sm"
+          variant={selected ? 'solid' : 'ghost'}
+          tooltip={'选择 ' + node.worker.id + ' 查看详情'}
+          onPress={() => set(selectedWorkerId, selected ? '' : node.worker.id)}
+        >
+          {cleanText(node.worker.id, 40)}
+        </Button>
+        <Badge tone={lifecycleTone(node.worker.lifecycle)}>
+          {LIFECYCLE_LABEL[node.worker.lifecycle]}
+        </Badge>
+        {node.attention.length > 0 ? (
+          <Badge tone="warning">需关注 {node.attention.length}</Badge>
+        ) : null}
+        {node.worker.freshness === 'stale' ? <Badge tone="warning">过期</Badge> : null}
+        {node.worker.startConfirmation === 'unobserved' ? (
+          <Badge tone="warning">启动未观察</Badge>
+        ) : null}
+      </Row>
+      <Text size="xs">
+        {task}
+        {relation ? ' · ' + relation : ''}
+      </Text>
+    </Stack>
+  )
+}
+
+function TopologySection({
+  view,
+  topology,
+  workerId
+}: {
+  view: RunView
+  topology: Topology
+  workerId: string
+}) {
+  if (view.workers.length === 0) {
+    return (
+      <Stack gap="md">
+        {view.workerTotal > 0 ? (
+          <Callout tone="danger" title="Worker 记录不在已读取的数据中">
+            <Text size="xs">
+              快照记录了 {view.workerTotal} 个 Worker，但投影结果没有 Worker；不能据此判断无人执行。
+            </Text>
+          </Callout>
+        ) : (
+          <EmptyState
+            title="没有 Worker 记录"
+            description="快照的 workers 为空；这不代表没有执行。任务记录见“细节”。"
+            icon="agent"
+          />
+        )}
+      </Stack>
+    )
+  }
+
+  const rootRows: TopologyRow[] = []
+  const anomalyRows: TopologyRow[] = []
+  flattenRows(topology.roots, 0, rootRows)
+  flattenRows(topology.anomalies, 0, anomalyRows)
+  const rootShown = rootRows.slice(0, WORKER_ROW_LIMIT)
+  const anomalyShown = anomalyRows.slice(0, WORKER_ROW_LIMIT)
+  const detachedShown = topology.detachedTasks.slice(0, DETACHED_TASK_LIMIT)
+  const node = workerId ? topologyNode(topology, workerId) : null
+  const shownWorkerIds = new Set(
+    [...rootShown, ...anomalyShown].map((row) => row.node.worker.id)
+  )
+  const renderRows = (rows: TopologyRow[]) =>
+    rows.map((row) => (
+      <Stack key={'worker:' + row.node.worker.id} gap="sm">
+        <WorkerRow
+          row={row}
+          selected={row.node.worker.id === workerId}
+        />
+        {row.node.worker.id === workerId ? <WorkerDetail node={row.node} /> : null}
+      </Stack>
+    ))
+
+  return (
+    <Stack gap="md">
+      <Row gap="xs" wrap>
+        <Badge tone="neutral">Worker {view.workerTotal}</Badge>
+        {view.attentionTotal > 0 ? <Badge tone="warning">需关注 {view.attentionTotal}</Badge> : null}
+        {topology.counts.anomalies > 0 ? (
+          <Badge tone="danger">关系异常 {topology.counts.anomalies}</Badge>
+        ) : null}
+        {topology.counts.workersWithoutRecordedTask > 0 ? (
+          <Badge tone="warning">
+            未记录任务 {topology.counts.workersWithoutRecordedTask}
+          </Badge>
+        ) : null}
+        {topology.counts.workersWithInvalidTask > 0 ? (
+          <Badge tone="warning">
+            任务记录无效 {topology.counts.workersWithInvalidTask}
+          </Badge>
+        ) : null}
+        {topology.detachedTasks.length > 0 ? (
+          <Badge tone="neutral">未关联任务 {topology.detachedTasks.length}</Badge>
+        ) : null}
+      </Row>
+      {topology.projectionTruncated ? (
+        <Callout tone="warning" title="Worker 投影已截断">
+          <Text size="xs">
+            快照记录了 {view.workerTotal} 个 Worker，这里只读取了前 {view.workers.length} 个；父节点位于未读取部分时显示为“不在已读取的 Worker 中”，不会改判为缺失或直属协调者。
+          </Text>
+        </Callout>
+      ) : null}
+      <Stack gap="xs">
+        <Heading level={3}>协调者 · 本运行</Heading>
+        <Text muted size="xs">
+          {'运行状态 ' +
+            RUN_STATUS_LABEL[view.status] +
+            ' · 快照记录 ' +
+            view.workerTotal +
+            ' 个 Worker · ' +
+            view.attentionTotal +
+            ' 项需关注' +
+            (topology.counts.anomalies > 0
+              ? ' · ' + topology.counts.anomalies + ' 个关系异常'
+              : '')}
+        </Text>
+        <Text muted size="xs">
+          未记录 parent_worker_id 的 Worker 列在顶层；缩进和“父 …”只来自已记录字段。
+        </Text>
+      </Stack>
+      {rootRows.length > WORKER_ROW_LIMIT ? (
+        <Text muted size="xs">
+          Worker 行仅显示前 {WORKER_ROW_LIMIT} 个（含嵌套行），共 {rootRows.length} 个。
+        </Text>
+      ) : null}
+      {rootShown.length > 0 ? <Stack gap="sm">{renderRows(rootShown)}</Stack> : null}
+      {anomalyRows.length > 0 ? (
+        <Stack gap="sm">
+          <Separator />
+          <Heading level={3}>关系异常 · {anomalyRows.length}</Heading>
+          <Text muted size="xs">
+            父节点缺失、未知或成环；不会并入协调者。
+            {topology.depthLimited > 0
+              ? ' 其中 ' + topology.depthLimited + ' 个因层级过深而平铺。'
+              : ''}
+          </Text>
+          {anomalyRows.length > WORKER_ROW_LIMIT ? (
+            <Text muted size="xs">
+              关系异常中的 Worker 行仅显示前 {WORKER_ROW_LIMIT} 个（含嵌套行），共{' '}
+              {anomalyRows.length} 个。
+            </Text>
+          ) : null}
+          {renderRows(anomalyShown)}
+        </Stack>
+      ) : null}
+      {topology.detachedTasks.length > 0 ? (
+        <Stack gap="sm">
+          <Separator />
+          <Heading level={3}>未关联 Worker 的任务 · {topology.detachedTasks.length}</Heading>
+          <Text muted size="xs">
+            这些任务没有 Worker 的 task_id 指向它们；未关联不代表没有执行。
+          </Text>
+          {topology.detachedTasks.length > DETACHED_TASK_LIMIT ? (
+            <Text muted size="xs">
+              未关联任务仅显示前 {DETACHED_TASK_LIMIT} 个，共 {topology.detachedTasks.length} 个。
+            </Text>
+          ) : null}
+          {detachedShown.map((task) => (
+            <Stack key={'task:' + task.id} gap="xs">
+              <Text size="sm">{task.id}</Text>
+              <Text size="xs">
+                {cleanText(task.title, 160)} · 状态 {TASK_STATUS_LABEL[task.status]}
+                {task.dependencies.length > 0 ? ' · 依赖 ' + task.dependencies.join(', ') : ''}
+              </Text>
+            </Stack>
+          ))}
+        </Stack>
+      ) : null}
+      {node && !shownWorkerIds.has(node.worker.id) ? (
+        <Stack gap="sm">
+          <Separator />
+          <Text muted size="xs">
+            该 Worker 不在当前显示的行中（可能被行数上限截断）。
+          </Text>
+          <WorkerDetail node={node} />
+        </Stack>
+      ) : null}
+      {node === null ? (
+        <Text muted size="xs">
+          选择拓扑中的一个 Worker 查看任务、生命周期与自报细节。
+        </Text>
+      ) : null}
+      <Text muted size="xs">
+        父子关系只来自 parent_worker_id；未记录父 Worker 的列在顶层，不声称直接隶属；父节点缺失、无效、成环或超出读取上限时不会推断归属。
+      </Text>
+    </Stack>
+  )
+}
+
+function RunMeta({ view }: { view: RunView }) {
+  const overviewItems = [
+    { label: '运行 ID', value: view.id, code: true },
+    { label: 'Orca Run ID', value: view.orcaRunId ?? '未记录', code: view.orcaRunId !== null },
+    { label: '模式', value: MODE_LABEL[view.mode] },
+    { label: '阶段', value: view.phase || '未记录' },
+    { label: 'Schema', value: 'v' + view.schemaVersion },
+    { label: '来源', value: SOURCE_LABEL[view.source] }
+  ]
+  return (
+    <Stack gap="md">
+      <Heading level={3}>运行元数据</Heading>
+      <KeyValue items={overviewItems} />
+      {view.summary ? <Text size="sm">{view.summary}</Text> : null}
+      <Stack gap="xs">
+        <TimeRow label="最近观测" at={view.lastObservedAt} />
+        <TimeRow label="最近有效进展" at={view.lastEffectiveProgressAt} />
+        <TimeRow label="开始" at={view.startedAt} />
+        <TimeRow label="结束" at={view.endedAt} />
+      </Stack>
+    </Stack>
+  )
+}
+
+function TasksSection({ view }: { view: RunView }) {
+  const workerCounts = new Map<string, number>()
+  for (const worker of view.workers) {
+    const taskId = recordedTaskId(worker)
+    if (taskId === null) continue
+    workerCounts.set(taskId, (workerCounts.get(taskId) ?? 0) + 1)
+  }
   const shown = view.tasks.slice(0, TASK_LIMIT)
   const rows = shown.map((task) => ({
     key: task.id,
@@ -348,14 +685,16 @@ function Tasks({ view }: { view: RunView }) {
       id: task.id,
       title: task.title,
       status: TASK_STATUS_LABEL[task.status],
-      dependencies: cleanText(task.dependencies.join(', ') || '—', 80),
+      workers: workerCounts.get(task.id) ?? 0,
       orca: task.orcaTaskId ?? '—',
+      dependencies: cleanText(task.dependencies.join(', ') || '—', 80),
       note: taskNote(task)
     }
   }))
   const counts = view.taskCounts
   return (
     <Stack gap="md">
+      <Heading level={3}>任务</Heading>
       <Row gap="xs" wrap>
         <Badge tone="neutral">总数 {counts.total}</Badge>
         {counts.accepted > 0 ? <Badge tone="success">已验收 {counts.accepted}</Badge> : null}
@@ -372,84 +711,38 @@ function Tasks({ view }: { view: RunView }) {
         <Table
           label="任务"
           columns={[
-            { key: 'id', label: 'ID', width: 'md' },
-            { key: 'title', label: '标题', width: 'auto' },
+            { key: 'id', label: 'ID', width: 'sm' },
+            { key: 'title', label: '标题', width: 'auto', minWidth: 'sm' },
             { key: 'status', label: '状态', width: 'sm' },
-            { key: 'dependencies', label: '依赖', width: 'md', hideBelow: 'md' },
+            { key: 'workers', label: 'Worker', width: 'xs', align: 'end' },
             { key: 'orca', label: 'Orca Task', width: 'md', hideBelow: 'md' },
+            { key: 'dependencies', label: '依赖', width: 'md', hideBelow: 'md' },
             { key: 'note', label: '备注', width: 'lg', hideBelow: 'md' }
           ]}
           rows={rows}
           emptyText="没有任务记录"
         />
       )}
-      {view.taskCounts.total > TASK_LIMIT ? (
+      {counts.total > TASK_LIMIT ? (
         <Text muted size="xs">
-          仅显示前 {TASK_LIMIT} 个任务，共 {view.taskCounts.total} 个。
+          仅显示前 {TASK_LIMIT} 个任务，共 {counts.total} 个。
         </Text>
       ) : null}
       <Text muted size="xs">
-        状态是协调者记录的事实，不是独立验收；缺失或无法识别的状态显示为未知。
+        “Worker”列是 task_id 指向该任务的 Worker 数；0 表示没有记录，不代表任务没有执行。状态不是独立验收。
       </Text>
     </Stack>
   )
 }
 
-function Workers({ view }: { view: RunView }) {
-  const shown = view.workers.slice(0, WORKER_LIMIT)
-  const rows = shown.map((worker) => ({
-    key: worker.id,
-    cells: {
-      worker: worker.id,
-      task: worker.taskId ?? '未知',
-      dispatch: worker.dispatchId ?? '—',
-      parent: worker.parentWorkerId ?? '—',
-      attempt: worker.attempt ?? '未知',
-      lifecycle: LIFECYCLE_LABEL[worker.lifecycle],
-      reported: LIFECYCLE_LABEL[worker.reportedLifecycle],
-      start: START_LABEL[worker.startConfirmation],
-      freshness: FRESHNESS_LABEL[worker.freshness],
-      worktree: worker.worktree || '未记录',
-      report: cleanText(worker.reportedSummary || '—', 120)
+function DeliverySection({ view }: { view: RunView }) {
+  const summary = DELIVERY_FIELDS.map((field) => {
+    const count = view.deliveryCounts[field]
+    return {
+      label: DELIVERY_LABEL[field],
+      value: '是 ' + count.yes + ' · 否 ' + count.no + ' · 未核验 ' + count.unverified
     }
-  }))
-  return (
-    <Stack gap="md">
-      {rows.length === 0 ? (
-        <EmptyState title="没有 Worker 记录" description="快照中没有 workers。" icon="agent" />
-      ) : (
-        <Table
-          label="Worker"
-          columns={[
-            { key: 'worker', label: 'Worker', width: 'md' },
-            { key: 'task', label: '任务', width: 'md' },
-            { key: 'dispatch', label: 'Dispatch', width: 'md', hideBelow: 'md' },
-            { key: 'parent', label: '父 Worker', width: 'md', hideBelow: 'md' },
-            { key: 'attempt', label: '次数', width: 'xs', align: 'end', hideBelow: 'md' },
-            { key: 'lifecycle', label: '核验生命周期', width: 'sm' },
-            { key: 'reported', label: '自报生命周期', width: 'sm', hideBelow: 'sm' },
-            { key: 'start', label: '启动确认', width: 'sm', hideBelow: 'md' },
-            { key: 'freshness', label: '时效', width: 'sm', hideBelow: 'md' },
-            { key: 'worktree', label: '工作区（基名）', width: 'md', hideBelow: 'md' },
-            { key: 'report', label: '自报摘要', width: 'lg', hideBelow: 'md' }
-          ]}
-          rows={rows}
-          emptyText="没有 Worker 记录"
-        />
-      )}
-      {view.workerTotal > WORKER_LIMIT ? (
-        <Text muted size="xs">
-          仅显示前 {WORKER_LIMIT} 个 Worker，共 {view.workerTotal} 个。
-        </Text>
-      ) : null}
-      <Text muted size="xs">
-        自报不等于验收；启动确认 observed 才表示观察到启动，unknown 与 unobserved 不同。
-      </Text>
-    </Stack>
-  )
-}
-
-function DeliveryTable({ view }: { view: RunView }) {
+  })
   const shown = view.deliveries.slice(0, DELIVERY_LIMIT)
   const rows = shown.map((delivery) => ({
     key: delivery.taskId,
@@ -464,8 +757,13 @@ function DeliveryTable({ view }: { view: RunView }) {
   }))
   return (
     <Stack gap="md">
+      <Heading level={3}>交付事实</Heading>
+      <KeyValue items={summary} />
       <Text muted size="xs">
-        证据引用不在此渲染；这里只显示交付事实与引用数量。
+        只有严格 true/false 才是已核验；null 或缺失为未核验。没有 delivery 不代表成功。
+      </Text>
+      <Text muted size="xs">
+        未记录交付的任务：{view.deliveryMissingTasks}（不等于成功）。
       </Text>
       {rows.length === 0 ? (
         <EmptyState title="没有交付记录" description="未记录不等于成功。" icon="package" />
@@ -473,7 +771,7 @@ function DeliveryTable({ view }: { view: RunView }) {
         <Table
           label="交付"
           columns={[
-            { key: 'task', label: '任务', width: 'auto', minWidth: 'md' },
+            { key: 'task', label: '任务', width: 'auto', minWidth: 'sm' },
             { key: 'implemented', label: '已实施', width: 'sm' },
             { key: 'integrated', label: '已集成', width: 'sm', hideBelow: 'sm' },
             { key: 'merged', label: '已合并', width: 'sm' },
@@ -490,13 +788,13 @@ function DeliveryTable({ view }: { view: RunView }) {
         </Text>
       ) : null}
       <Text muted size="xs">
-        开 PR 不自动改变交付字段；未记录或 null 为未核验，false 表示已核验为否。
+        开 PR 不自动改变交付字段；false 表示已核验为否。证据引用不在这里渲染。
       </Text>
     </Stack>
   )
 }
 
-function Artifacts({ view }: { view: RunView }) {
+function ArtifactsSection({ view }: { view: RunView }) {
   const shown: ArtifactView[] = view.artifacts.slice(0, ARTIFACT_LIMIT)
   const rows = shown.map((artifact) => ({
     key: artifact.id,
@@ -508,6 +806,7 @@ function Artifacts({ view }: { view: RunView }) {
   }))
   return (
     <Stack gap="md">
+      <Heading level={3}>产物</Heading>
       {rows.length === 0 ? (
         <Text muted size="xs">
           没有记录产物引用。
@@ -517,7 +816,7 @@ function Artifacts({ view }: { view: RunView }) {
           label="产物"
           columns={[
             { key: 'kind', label: '类型', width: 'sm' },
-            { key: 'label', label: '标签', width: 'auto' },
+            { key: 'label', label: '标签', width: 'auto', minWidth: 'sm' },
             { key: 'task', label: '任务', width: 'md', hideBelow: 'md' }
           ]}
           rows={rows}
@@ -536,7 +835,7 @@ function Artifacts({ view }: { view: RunView }) {
   )
 }
 
-function Events({ view }: { view: RunView }) {
+function EventsSection({ view }: { view: RunView }) {
   const rows = view.events.map((event: EventView) => ({
     key: 'event-' + event.index,
     cells: {
@@ -548,54 +847,69 @@ function Events({ view }: { view: RunView }) {
     }
   }))
   return (
+    <Collapsible
+      title="最近事件"
+      description={'共 ' + view.eventTotal + ' 条，显示最近 ' + view.events.length + ' 条'}
+    >
+      <Stack gap="md">
+        {rows.length === 0 ? (
+          <EmptyState title="没有事件记录" description="快照中没有 events。" icon="activity" />
+        ) : (
+          <Table
+            label="事件"
+            columns={[
+              { key: 'time', label: '时间', width: 'sm' },
+              { key: 'type', label: '类型', width: 'sm' },
+              { key: 'source', label: '来源', width: 'sm', hideBelow: 'md' },
+              { key: 'bookkeeping', label: '记账', width: 'xs', hideBelow: 'md' },
+              { key: 'summary', label: '摘要', width: 'auto' }
+            ]}
+            rows={rows}
+            emptyText="没有事件记录"
+          />
+        )}
+        <Text muted size="xs">
+          事件是记录摘要；heartbeat 不是有效进展。共 {view.eventTotal} 条，显示最近 {view.events.length} 条。
+        </Text>
+      </Stack>
+    </Collapsible>
+  )
+}
+
+function DetailsSection({ view }: { view: RunView }) {
+  return (
     <Stack gap="md">
-      {rows.length === 0 ? (
-        <EmptyState title="没有事件记录" description="快照中没有 events。" icon="activity" />
-      ) : (
-        <Table
-          label="事件"
-          columns={[
-            { key: 'time', label: '时间', width: 'sm' },
-            { key: 'type', label: '类型', width: 'sm' },
-            { key: 'source', label: '来源', width: 'sm', hideBelow: 'md' },
-            { key: 'bookkeeping', label: '记账', width: 'xs', hideBelow: 'md' },
-            { key: 'summary', label: '摘要', width: 'auto' }
-          ]}
-          rows={rows}
-          emptyText="没有事件记录"
-        />
-      )}
-      <Text muted size="xs">
-        事件是记录摘要；heartbeat 不是有效进展。共 {view.eventTotal} 条，显示最近 {view.events.length} 条。
-      </Text>
+      <RunMeta view={view} />
+      <Separator />
+      <TasksSection view={view} />
+      <Separator />
+      <DeliverySection view={view} />
+      <Separator />
+      <ArtifactsSection view={view} />
+      <Separator />
+      <EventsSection view={view} />
     </Stack>
   )
 }
 
 function Detail({ view }: { view: RunView }) {
   const rawTab = read(selectedTab)
-  const activeTab = ['overview', 'tasks', 'workers', 'deliveries'].includes(rawTab)
-    ? rawTab
-    : 'overview'
+  const activeTab = rawTab === 'details' ? 'details' : 'topology'
+  const topology = buildTopology(view)
+  const selectedWorker = read(selectedWorkerId)
   return (
     <Stack gap="md">
-      <Tabs label="运行详情" value={activeTab} onChange={(value) => set(selectedTab, value)}>
-        <Tab value="overview" label="概览">
-          <Overview view={view} />
+      <AttentionSection view={view} />
+      <Tabs
+        label="运行详情"
+        value={activeTab}
+        onChange={(value) => set(selectedTab, value === 'details' ? 'details' : 'topology')}
+      >
+        <Tab value="topology" label="拓扑">
+          <TopologySection view={view} topology={topology} workerId={selectedWorker} />
         </Tab>
-        <Tab value="tasks" label="任务">
-          <Tasks view={view} />
-        </Tab>
-        <Tab value="workers" label="Worker">
-          <Workers view={view} />
-        </Tab>
-        <Tab value="deliveries" label="交付">
-          <Stack gap="md">
-            <DeliveryTable view={view} />
-            <Separator />
-            <Heading level={3}>产物</Heading>
-            <Artifacts view={view} />
-          </Stack>
+        <Tab value="details" label="细节">
+          <DetailsSection view={view} />
         </Tab>
       </Tabs>
     </Stack>
@@ -617,13 +931,7 @@ function RootProblems({ listing: value }: { listing: RunListing }) {
   )
 }
 
-function RunSelector({
-  listing: value,
-  selected
-}: {
-  listing: RunListing
-  selected: string
-}) {
+function RunSelector({ listing: value, selected }: { listing: RunListing; selected: string }) {
   return (
     <Select
       label="运行"
@@ -756,6 +1064,33 @@ export default function Panel() {
           <Stack gap="md">
             <RunSelector listing={currentListing} selected={selected} />
             <RunHeader view={currentDetail} summary={selectedSummary} observedAt={observedAt} />
+            {currentDetail?.mode === 'DEMO' ? (
+              <Callout tone="warning" title="DEMO 数据">
+                <Text size="xs">该运行标记为 DEMO；示例数据不代表真实执行或验收。</Text>
+              </Callout>
+            ) : null}
+            {currentDetail?.freshness === 'stale' ? (
+              <Callout tone="warning" title="观测已过期">
+                <Text size="xs">
+                  最近观测已超过 {Math.round(STALE_SECONDS / 60)} 分钟；过期不等于失败，也不代表没有进展。
+                </Text>
+              </Callout>
+            ) : null}
+            {currentDetail?.health === 'degraded' ||
+            currentDetail?.health === 'blocked' ||
+            currentDetail?.health === 'lost' ? (
+              <Callout
+                tone={currentDetail.health === 'lost' ? 'danger' : 'warning'}
+                title="运行健康"
+              >
+                <Text size="xs">记录的健康状态：{HEALTH_LABEL[currentDetail.health]}。</Text>
+              </Callout>
+            ) : null}
+            {currentDetail && currentDetail.warnings.length > 0 ? (
+              <Callout tone="warning" title="快照提示">
+                <WarningLines lines={currentDetail.warnings} />
+              </Callout>
+            ) : null}
             {isDetailLoading && currentDetail !== null ? (
               <Row gap="xs" align="center">
                 <Spinner label="刷新运行快照" />
@@ -782,7 +1117,7 @@ export default function Panel() {
             {currentDetail === null && currentDetailError === null && !isDetailLoading ? (
               <EmptyState
                 title="选择一个运行"
-                description="从上方列表选择一个运行以读取它的状态、任务、Worker 和交付。"
+                description="从上方列表选择一个运行以读取协调者与 Worker 的拓扑。"
                 icon="activity"
               />
             ) : null}
@@ -798,7 +1133,7 @@ export default function Panel() {
         <Stack gap="xs">
           <Heading level={2}>orchestra-auto</Heading>
           <Text muted size="xs">
-            只读观测 · 不写入运行状态 · 不执行编排
+            只读观测 · 以协调者与 Worker 拓扑为核心 · 不执行编排
           </Text>
         </Stack>
         <Row gap="xs" align="center">
@@ -817,7 +1152,7 @@ export default function Panel() {
       {content}
       <Separator />
       <Text muted size="xs">
-        数据来自 progress.json 与 progress 注册表；只显示记录事实，不推断成功。缺失、损坏、不可用和过期状态会明确标出。
+        数据来自 progress.json 与 progress 注册表；拓扑只使用已记录的 parent_worker_id 与 task_id，不推断未记录关系。缺失、损坏、不可用和过期状态会明确标出。
       </Text>
     </Stack>
   )

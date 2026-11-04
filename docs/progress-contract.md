@@ -69,7 +69,7 @@ Each value is an object; the key is the worker ID. Read fields:
 
 | Field | Rule |
 | --- | --- |
-| `task_id`, `dispatch_id`, `parent_worker_id` | Portable IDs or unknown. |
+| `task_id`, `dispatch_id`, `parent_worker_id` | Portable IDs or unknown. `task_id` and `parent_worker_id` keep three states: absent (`none`), a portable ID (`recorded`), or a present non-portable value (`invalid`). The raw invalid value is never rendered. |
 | `attempt` | Positive integer, otherwise unknown. |
 | `lifecycle`, `reported_lifecycle` | Worker lifecycle enums; unknown on missing/other values. |
 | `start_confirmation` | `unknown`, `observed`, `unobserved`, or the v1 value `unsupported`; shown separately from lifecycle. |
@@ -79,6 +79,39 @@ Each value is an object; the key is the worker ID. Read fields:
 
 Self-reported values never update verified lifecycle, task status or delivery
 facts in this projection.
+
+## Topology
+
+The panel builds the coordinator/worker view from two recorded fields only:
+`workers[*].parent_worker_id` and `workers[*].task_id`. It never adds a
+coordinator worker row, never uses dispatch or worktree names as hierarchy, and
+never promotes an unresolved worker to a direct report.
+
+| Recorded state | Topology result |
+| --- | --- |
+| `parent_worker_id` absent/null | Top-level worker row. The panel does not claim a parent edge. |
+| `parent_worker_id` resolves to another projected worker | Child row, indented with the recorded parent's ID. |
+| `parent_worker_id` recorded but not in the projected workers | `missing-parent` anomaly; `父 <id> 未记录`. |
+| `parent_worker_id` present but non-portable | `invalid-parent` anomaly; the raw value is discarded. |
+| Parent chain contains a cycle | `cycle` anomaly for each member; cycle members are not nested inside each other. |
+| Parent chain exceeds 12 worker levels | The deeper subtree is listed flat as `depth-limit` rather than dropped or re-parented. |
+| Projection hit the 500-worker cap and the parent is outside it | `unresolved-parent`; shown as "not in the read workers", not as missing. |
+
+Indentation compacts after four levels (`↳↳↳↳+n`); every nested row still
+names its recorded parent, and rows past the depth cap are listed flat in the
+anomaly group rather than re-parented.
+
+Task association follows the same pattern: `none` renders as unrecorded,
+`recorded` with no matching task renders the missing task ID, and `invalid`
+renders `任务：记录无效`. A recorded task with no worker's `task_id`
+pointing at it is listed separately as unassociated; this is not evidence that
+the task was not executed.
+
+Recorded attention items carry the task or worker they belong to (`taskId` or
+`workerId`). The topology attaches task items to every worker whose `task_id`
+points at that task, and worker items only to the named worker. Run-level items
+have neither field and stay in the top-level attention list only. A worker's
+self-report never changes its lifecycle, task status or delivery facts.
 
 ## `deliveries`
 
@@ -152,9 +185,13 @@ the worker resolves it against its own discovery result.
 | directory entries scanned per root | 1000 |
 | runs listed | 200 |
 | task/worker/delivery view arrays | 500 each |
-| task/worker/delivery rows rendered | 100 each |
+| root-tree worker rows rendered | 100 (nested rows included) |
+| anomaly-tree worker rows rendered | 100 (nested rows included) |
+| detached task rows rendered | 50 |
+| displayed worker nesting | 12 levels |
+| task/delivery rows rendered | 100 each |
 | attention records projected | 100 |
-| attention items rendered | 20 |
+| attention items rendered | 10 |
 | artifacts projected / rendered | 100 / 50 |
 | events projected / rendered | 20 / 20 |
 | stale threshold | 300 s |

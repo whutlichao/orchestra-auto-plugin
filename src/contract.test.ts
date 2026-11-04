@@ -56,9 +56,12 @@ test('projects a real recorder snapshot without inventing success', () => {
 
   assert.equal(view.events[0].bookkeeping, true)
   assert.equal(view.eventTotal, 14)
-  assert.ok(view.attention.some((item) => item.kind === 'blocked'))
-  assert.ok(view.attention.some((item) => item.kind === 'decision'))
-  assert.ok(view.attention.some((item) => item.kind === 'worker-lost'))
+  const blocked = view.attention.find((item) => item.kind === 'blocked')
+  assert.ok(blocked?.taskId)
+  const decision = view.attention.find((item) => item.kind === 'decision')
+  assert.ok(decision?.taskId)
+  const lost = view.attention.find((item) => item.kind === 'worker-lost')
+  assert.equal(lost?.workerId, 'w-lost-a2')
 
   const serialized = JSON.stringify(view)
   assert.ok(!serialized.includes('/tmp/orchestra-auto-fixture-target'))
@@ -206,6 +209,43 @@ test('freshness distinguishes current, stale and unknown observations', () => {
     projectRun(noObservation, { source: 'registry', now: FIXTURE_NOW }).freshness,
     'unknown'
   )
+})
+
+
+test('task and parent references distinguish absent, recorded and invalid values', () => {
+  const snapshot = parseSnapshot(fixture('real-active/progress.json'))
+  const worker = snapshot.workers['w-panel-a1'] as Record<string, unknown>
+  const project = () =>
+    projectRun(snapshot, { source: 'audit-root', now: FIXTURE_NOW }).workers.find(
+      (item) => item.id === 'w-panel-a1'
+    )
+
+  worker.task_id = 't-panel'
+  worker.parent_worker_id = 'w-plan-a1'
+  let projected = project()
+  assert.ok(projected)
+  assert.equal(projected.taskState, 'recorded')
+  assert.equal(projected.taskId, 't-panel')
+  assert.equal(projected.parentState, 'recorded')
+  assert.equal(projected.parentWorkerId, 'w-plan-a1')
+
+  worker.task_id = 42
+  worker.parent_worker_id = 'w/plan'
+  projected = project()
+  assert.ok(projected)
+  assert.equal(projected.taskState, 'invalid')
+  assert.equal(projected.taskId, null)
+  assert.equal(projected.parentState, 'invalid')
+  assert.equal(projected.parentWorkerId, null)
+
+  delete worker.task_id
+  delete worker.parent_worker_id
+  projected = project()
+  assert.ok(projected)
+  assert.equal(projected.taskState, 'none')
+  assert.equal(projected.taskId, null)
+  assert.equal(projected.parentState, 'none')
+  assert.equal(projected.parentWorkerId, null)
 })
 
 test('schema v1 stays readable and unknown values stay unknown', () => {

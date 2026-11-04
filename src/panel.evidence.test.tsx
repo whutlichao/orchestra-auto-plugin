@@ -43,7 +43,17 @@ test('UI evidence: select another run and refresh the listing', async () => {
 
   const evidence = ['initial: ' + summaryOf(view)]
   assert.ok(view.find({ text: /示例：只读观测面板/ }))
+  assert.ok(view.find({ text: /协调者 · 本运行/ }))
 
+  await view.press({ type: 'Button', text: 'w-panel-a1' })
+  evidence.push('after-select-worker: ' + summaryOf(view))
+  assert.ok(view.find({ text: /Worker 详情/ }))
+
+  await view.select({ label: '运行详情' }, 'details')
+  evidence.push('after-details-tab: ' + summaryOf(view))
+  assert.ok(view.find({ text: /运行元数据/ }))
+
+  await view.select({ label: '运行详情' }, 'topology')
   await view.select({ label: '运行' }, 'demo-finished')
   evidence.push('after-select-demo-finished: ' + summaryOf(view))
   assert.ok(view.find({ text: /示例：已完成运行/ }))

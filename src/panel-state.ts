@@ -31,7 +31,8 @@ export const detailError = atom<PanelError | null>(null)
 export const loading = atom(false)
 export const detailLoading = atom(false)
 export const selectedRunId = atom('selectedRunId', '', { persist: 'plugin' })
-export const selectedTab = atom('selectedTab', 'overview', { persist: 'plugin' })
+export const selectedTab = atom('selectedTab', 'topology', { persist: 'plugin' })
+export const selectedWorkerId = atom('selectedWorkerId', '', { persist: 'plugin' })
 
 let generation = 0
 
@@ -81,11 +82,13 @@ export async function refresh(): Promise<void> {
     const selected = next.runs.find((run) => run.id === wanted) ?? next.runs[0]
     if (!selected) {
       set(selectedRunId, '')
+      set(selectedWorkerId, '')
       set(detail, null)
       set(detailError, null)
       return
     }
     if (selected.id !== read(selectedRunId)) {
+      set(selectedWorkerId, '')
       set(detail, null)
       set(detailError, null)
     }
@@ -108,6 +111,7 @@ export function selectRun(runId: string): void {
   const current = ++generation
   set(loading, false)
   set(selectedRunId, runId)
+  set(selectedWorkerId, '')
   set(detail, null)
   set(detailError, null)
   void loadRun(runId, current)

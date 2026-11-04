@@ -25,14 +25,16 @@ const task = (
 
 const worker = (
   id: string,
-  taskId: string,
+  taskId: string | null,
   overrides: Partial<RunView['workers'][number]> = {}
 ) => ({
   id,
   taskId,
+  taskState: (taskId === null ? 'none' : 'recorded') as RunView['workers'][number]['taskState'],
   dispatchId: 'd-' + id,
   attempt: 1,
   parentWorkerId: null,
+  parentState: 'none' as const,
   lifecycle: 'running' as const,
   reportedLifecycle: 'unknown' as const,
   startConfirmation: 'observed' as const,
@@ -53,7 +55,7 @@ export const sampleView: RunView = {
   mode: 'DEMO',
   phase: 'implementation',
   summary:
-    '演示数据：包含运行中的任务、阻塞与待决事项、失联 Worker，以及 true/false/未核验三种交付事实。',
+    '演示数据：协调者下有多层 Worker，包含缺失父节点与无效父关系、阻塞与待决事项、失联 Worker，以及 true/false/未核验三种交付事实。',
   orcaRunId: 'run_demo00000000',
   startedAt: started,
   lastObservedAt: observed,
@@ -61,7 +63,7 @@ export const sampleView: RunView = {
   endedAt: null,
   freshness: 'current',
   tasks: [
-    task('t-plan', '协议与面板设计', 'accepted'),
+    task('t-plan', '协议与面板设计', 'accepted', { orcaTaskId: 'ot-plan-1' }),
     task('t-panel', '实现只读面板', 'running', { dependencies: ['t-plan'] }),
     task('t-api', '等待审计目录权限', 'blocked', {
       dependencies: ['t-plan'],
@@ -73,11 +75,12 @@ export const sampleView: RunView = {
     task('t-old', '旧方案：直读注册表二进制', 'rejected', {
       blockedReason: '方向不符合只读约束'
     }),
-    task('t-extra', '补充路径安全测试', 'pending', { dependencies: ['t-panel'] })
+    task('t-extra', '补充路径安全测试', 'pending', { dependencies: ['t-panel'] }),
+    task('t-unassigned', '未派发 Worker 的收尾任务', 'pending')
   ],
   taskCounts: {
     unknown: 0,
-    pending: 1,
+    pending: 2,
     ready: 0,
     running: 1,
     blocked: 1,
@@ -88,17 +91,27 @@ export const sampleView: RunView = {
     failed: 0,
     paused: 0,
     cancelled: 0,
-    total: 6
+    total: 7
   },
-  workerTotal: 5,
+  workerTotal: 6,
   workers: [
     worker('w-plan-a1', 't-plan', {
       lifecycle: 'closed',
       reportedLifecycle: 'reported_done',
       reportedSummary: '设计完成，等待验收。'
     }),
-    worker('w-panel-a1', 't-panel'),
+    worker('w-panel-a1', 't-panel', {
+      parentWorkerId: 'w-plan-a1',
+      parentState: 'recorded'
+    }),
+    worker('w-panel-helper', 't-extra', {
+      parentWorkerId: 'w-panel-a1',
+      parentState: 'recorded',
+      reportedSummary: '补充路径测试中。'
+    }),
     worker('w-api-a1', 't-api', {
+      parentWorkerId: 'w-api-parent-ghost',
+      parentState: 'recorded',
       lifecycle: 'lost',
       lastObservedAt: staleObserved,
       freshness: 'stale'
@@ -108,6 +121,7 @@ export const sampleView: RunView = {
       startConfirmation: 'unobserved'
     }),
     worker('w-old-a1', 't-old', {
+      parentState: 'invalid',
       lifecycle: 'failed',
       reportedLifecycle: 'failed',
       startConfirmation: 'unknown',
@@ -115,7 +129,7 @@ export const sampleView: RunView = {
       freshness: 'stale'
     })
   ],
-  deliveryTotal: 6,
+  deliveryTotal: 7,
   deliveries: [
     {
       taskId: 't-api',
@@ -170,15 +184,24 @@ export const sampleView: RunView = {
       merged: true,
       trackerClosed: false,
       evidenceCount: 2
+    },
+    {
+      taskId: 't-unassigned',
+      recorded: false,
+      implemented: null,
+      integrated: null,
+      merged: null,
+      trackerClosed: null,
+      evidenceCount: 0
     }
   ],
   deliveryCounts: {
-    implemented: { yes: 1, no: 2, unverified: 3 },
-    integrated: { yes: 1, no: 1, unverified: 4 },
-    merged: { yes: 1, no: 1, unverified: 4 },
-    tracker_closed: { yes: 0, no: 2, unverified: 4 }
+    implemented: { yes: 1, no: 2, unverified: 4 },
+    integrated: { yes: 1, no: 1, unverified: 5 },
+    merged: { yes: 1, no: 1, unverified: 5 },
+    tracker_closed: { yes: 0, no: 2, unverified: 5 }
   },
-  deliveryMissingTasks: 2,
+  deliveryMissingTasks: 3,
   artifacts: [
     { id: 'artifact-report', taskId: 't-plan', kind: 'report', label: '验收报告' },
     { id: 'artifact-pr', taskId: 't-panel', kind: 'pr', label: 'PR #123' }
@@ -224,11 +247,36 @@ export const sampleView: RunView = {
   ],
   eventTotal: 4,
   attention: [
-    { id: 'task-blocked:t-api', kind: 'blocked', text: '等待审计目录权限：需要用户确认审计目录' },
-    { id: 'task-decision:t-docs', kind: 'decision', text: '安装与使用文档：是否同时发布到 Git 安装源？' },
-    { id: 'task-rejected:t-old', kind: 'rejected', text: '旧方案：直读注册表二进制：已打回' },
-    { id: 'worker-lost:w-api-a1', kind: 'worker-lost', text: 'w-api-a1：Worker 失联' },
-    { id: 'worker-failed:w-old-a1', kind: 'worker-failed', text: 'w-old-a1：Worker 失败' }
+    {
+      id: 'task-blocked:t-api',
+      kind: 'blocked',
+      text: '等待审计目录权限：需要用户确认审计目录',
+      taskId: 't-api'
+    },
+    {
+      id: 'task-decision:t-docs',
+      kind: 'decision',
+      text: '安装与使用文档：是否同时发布到 Git 安装源？',
+      taskId: 't-docs'
+    },
+    {
+      id: 'task-rejected:t-old',
+      kind: 'rejected',
+      text: '旧方案：直读注册表二进制：已打回',
+      taskId: 't-old'
+    },
+    {
+      id: 'worker-lost:w-api-a1',
+      kind: 'worker-lost',
+      text: 'w-api-a1：Worker 失联',
+      workerId: 'w-api-a1'
+    },
+    {
+      id: 'worker-failed:w-old-a1',
+      kind: 'worker-failed',
+      text: 'w-old-a1：Worker 失败',
+      workerId: 'w-old-a1'
+    }
   ],
   attentionTotal: 5,
   warnings: ['示例数据仅用于界面演示']
@@ -251,8 +299,8 @@ export const sampleFinishedView: RunView = {
     waiting_user: 0,
     rejected: 0,
     failed: 0,
-    accepted: 6,
-    total: 6
+    accepted: 7,
+    total: 7
   },
   tasks: sampleView.tasks.map((item) => ({
     ...item,
@@ -260,6 +308,24 @@ export const sampleFinishedView: RunView = {
     blockedReason: '',
     pendingDecision: ''
   })),
+  workers: sampleView.workers.map((item) => {
+    const parentId =
+      item.id === 'w-panel-a1'
+        ? 'w-plan-a1'
+        : item.id === 'w-panel-helper'
+          ? 'w-panel-a1'
+          : null
+    return {
+      ...item,
+      lifecycle: 'closed' as const,
+      reportedLifecycle: 'reported_done' as const,
+      startConfirmation: 'observed' as const,
+      reportedSummary: '已完成并记录。',
+      freshness: 'current' as const,
+      parentWorkerId: parentId,
+      parentState: parentId ? ('recorded' as const) : ('none' as const)
+    }
+  }),
   attention: [],
   attentionTotal: 0,
   warnings: []

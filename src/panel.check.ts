@@ -36,6 +36,77 @@ export default defineCheck({
       'run.get': () => sampleFinishedView
     }
   },
+  worker: {
+    persisted: { plugin: { selectedRunId: 'demo-active', selectedWorkerId: 'w-plan-a1' } },
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => sampleView
+    }
+  },
+  anomaly: {
+    persisted: { plugin: { selectedRunId: 'demo-active', selectedWorkerId: 'w-api-a1' } },
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => sampleView
+    }
+  },
+  details: {
+    persisted: { plugin: { selectedRunId: 'demo-active', selectedTab: 'details' } },
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => sampleView
+    }
+  },
+  cycle: {
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => ({
+        ...sampleView,
+        workerTotal: 2,
+        attention: [],
+        attentionTotal: 0,
+        workers: [
+          {
+            ...sampleView.workers[1],
+            id: 'w-cycle-a',
+            parentWorkerId: 'w-cycle-b',
+            parentState: 'recorded' as const
+          },
+          {
+            ...sampleView.workers[1],
+            id: 'w-cycle-b',
+            parentWorkerId: 'w-cycle-a',
+            parentState: 'recorded' as const
+          }
+        ]
+      })
+    }
+  },
+  'no-workers': {
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => ({ ...sampleView, workerTotal: 0, workers: [], attention: [], attentionTotal: 0 })
+    }
+  },
+  'large-workers': {
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => ({
+        ...sampleView,
+        workerTotal: 120,
+        workers: Array.from({ length: 120 }, (_, index) => ({
+          ...sampleView.workers[0],
+          id: 'w-bulk-' + index,
+          taskId: 't-plan',
+          parentWorkerId: null,
+          parentState: 'none' as const,
+          attempt: 1
+        })),
+        attention: [],
+        attentionTotal: 0
+      })
+    }
+  },
   stale: {
     requests: {
       'runs.list': () => sampleListing,

@@ -34,6 +34,7 @@ import {
   type DeliveryView,
   type EventView,
   type Freshness,
+  type ReferenceState,
   type RunSource,
   type RunStatus,
   type RunView,
@@ -45,6 +46,12 @@ import type { Snapshot } from './snapshot'
 
 function portableOrNull(value: unknown): string | null {
   return isPortableId(value) ? value : null
+}
+
+/** Distinguishes a field that is absent from one recorded with a non-portable value. */
+function referenceState(value: unknown): ReferenceState {
+  if (value === null || value === undefined) return 'none'
+  return portableOrNull(value) !== null ? 'recorded' : 'invalid'
 }
 
 function positiveIntOrNull(value: unknown): number | null {
@@ -100,12 +107,16 @@ function projectWorkers(snapshot: Snapshot, now: number, staleMs: number): Worke
   for (const [key, raw] of Object.entries(snapshot.workers)) {
     const worker = raw as Record<string, unknown>
     const lastObservedAt = timestamp(worker.last_observed)
+    const taskState = referenceState(worker.task_id)
+    const parentState = referenceState(worker.parent_worker_id)
     workers.push({
       id: key,
-      taskId: portableOrNull(worker.task_id),
+      taskId: taskState === 'recorded' ? (worker.task_id as string) : null,
+      taskState,
       dispatchId: portableOrNull(worker.dispatch_id),
       attempt: positiveIntOrNull(worker.attempt),
-      parentWorkerId: portableOrNull(worker.parent_worker_id),
+      parentWorkerId: parentState === 'recorded' ? (worker.parent_worker_id as string) : null,
+      parentState,
       lifecycle: enumValue(worker.lifecycle, WORKER_LIFECYCLES, 'unknown'),
       reportedLifecycle: enumValue(worker.reported_lifecycle, WORKER_LIFECYCLES, 'unknown'),
       startConfirmation: enumValue(worker.start_confirmation, START_CONFIRMATIONS, 'unknown'),
@@ -236,35 +247,58 @@ function projectAttention(
       items.push({
         id: 'task-blocked:' + task.id,
         kind: 'blocked',
-        text: task.title + '：' + (task.blockedReason || '已记录阻塞')
+        text: task.title + '：' + (task.blockedReason || '已记录阻塞'),
+        taskId: task.id
       })
     }
     if (task.status === 'waiting_user' || task.pendingDecision !== '') {
       items.push({
         id: 'task-decision:' + task.id,
         kind: 'decision',
-        text: task.title + '：' + (task.pendingDecision || '等待用户决定')
+        text: task.title + '：' + (task.pendingDecision || '等待用户决定'),
+        taskId: task.id
       })
     }
     if (task.status === 'failed') {
-      items.push({ id: 'task-failed:' + task.id, kind: 'failed', text: task.title + '：任务失败' })
+      items.push({
+        id: 'task-failed:' + task.id,
+        kind: 'failed',
+        text: task.title + '：任务失败',
+        taskId: task.id
+      })
     }
     if (task.status === 'rejected') {
-      items.push({ id: 'task-rejected:' + task.id, kind: 'rejected', text: task.title + '：已打回' })
+      items.push({
+        id: 'task-rejected:' + task.id,
+        kind: 'rejected',
+        text: task.title + '：已打回',
+        taskId: task.id
+      })
     }
   }
   for (const worker of workers) {
     if (worker.lifecycle === 'failed') {
-      items.push({ id: 'worker-failed:' + worker.id, kind: 'worker-failed', text: worker.id + '：Worker 失败' })
+      items.push({
+        id: 'worker-failed:' + worker.id,
+        kind: 'worker-failed',
+        text: worker.id + '：Worker 失败',
+        workerId: worker.id
+      })
     }
     if (worker.lifecycle === 'lost') {
-      items.push({ id: 'worker-lost:' + worker.id, kind: 'worker-lost', text: worker.id + '：Worker 失联' })
+      items.push({
+        id: 'worker-lost:' + worker.id,
+        kind: 'worker-lost',
+        text: worker.id + '：Worker 失联',
+        workerId: worker.id
+      })
     }
     if (worker.reportedLifecycle === 'failed' && worker.lifecycle !== 'failed') {
       items.push({
         id: 'worker-reported-failed:' + worker.id,
         kind: 'worker-failed',
-        text: worker.id + '：Worker 自报失败（未核验）'
+        text: worker.id + '：Worker 自报失败（未核验）',
+        workerId: worker.id
       })
     }
   }
