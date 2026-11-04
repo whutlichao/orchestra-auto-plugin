@@ -25,6 +25,10 @@ function worker(id: string, parentId: string | null = null): WorkerView {
 }
 
 function node(id: string, children: TopologyWorker[] = []): TopologyWorker {
+  // `planGraph` reads only children and depth; a nested fixture still gets the
+  // relation a built topology would give it, so a regression in the fixture
+  // cannot hide behind a wrong relation.
+  const nested = children.map((child) => ({ ...child, relation: 'child' as const }))
   return {
     worker: worker(id),
     task: null,
@@ -32,8 +36,8 @@ function node(id: string, children: TopologyWorker[] = []): TopologyWorker {
     relation: 'root',
     parentId: null,
     attention: [],
-    children,
-    descendantCount: children.reduce((sum, child) => sum + 1 + child.descendantCount, 0)
+    children: nested,
+    descendantCount: nested.reduce((sum, child) => sum + 1 + child.descendantCount, 0)
   }
 }
 

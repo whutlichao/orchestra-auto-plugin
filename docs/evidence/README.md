@@ -59,8 +59,8 @@ captures.
 The graph draws edges as real elements in the host's own tokens, not as text
 indentation:
 
-- each row renders one `Separator`-free `Box` rail cell per recorded ancestor
-  whose trunk continues past it, filled with the host's `muted` background;
+- each row renders one `Box` rail cell per recorded ancestor whose trunk
+  continues past it, filled with the host's `muted` background;
 - the row's own elbow is a 2 px vertical stem, a 2 px horizontal tick and, when
   a later sibling exists, a 2 px trunk down to the row's bottom edge;
 - a top-level row (`parent_worker_id` absent) renders no incoming edge at all,
