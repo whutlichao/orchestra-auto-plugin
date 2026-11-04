@@ -4,7 +4,7 @@
 // The panel imports these atoms and actions; it renders them and never talks to
 // the worker itself. Read-only: every request is a `runs.list` or `run.get`.
 import { atom, plugin, read, set, settings, type PanelContext } from 'orca'
-import type { RunListing, RunView } from './contract'
+import type { RunListing, RunSummary, RunView } from './contract'
 
 export type PanelError = { code: string; message: string }
 
@@ -31,8 +31,10 @@ export const detailError = atom<PanelError | null>(null)
 export const loading = atom(false)
 export const detailLoading = atom(false)
 export const selectedRunId = atom('selectedRunId', '', { persist: 'plugin' })
-export const selectedTab = atom('selectedTab', 'topology', { persist: 'plugin' })
 export const selectedWorkerId = atom('selectedWorkerId', '', { persist: 'plugin' })
+// Both secondary sections start collapsed: the graph is the panel's main view.
+export const attentionOpen = atom('attentionOpen', false, { persist: 'plugin' })
+export const detailsOpen = atom('detailsOpen', false, { persist: 'plugin' })
 
 let generation = 0
 
@@ -79,7 +81,7 @@ export async function refresh(): Promise<void> {
     if (current !== generation) return
     set(listing, next)
     const wanted = read(selectedRunId)
-    const selected = next.runs.find((run) => run.id === wanted) ?? next.runs[0]
+    const selected = next.runs.find((run: RunSummary) => run.id === wanted) ?? next.runs[0]
     if (!selected) {
       set(selectedRunId, '')
       set(selectedWorkerId, '')

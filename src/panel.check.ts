@@ -13,6 +13,25 @@ import {
   unavailableSummary
 } from './sample-data'
 
+// One worker and one attention item: the on-demand sections still fit a single
+// window-height screenshot, which a long graph would push below the fold.
+const smallView = {
+  ...sampleView,
+  workerTotal: 1,
+  workers: [sampleView.workers[0]],
+  tasks: [sampleView.tasks[0], sampleView.tasks[2]],
+  taskCounts: { ...sampleView.taskCounts, total: 2 },
+  deliveries: [],
+  deliveryTotal: 0,
+  artifacts: [],
+  artifactTotal: 0,
+  events: [],
+  eventTotal: 0,
+  attentionTotal: 1,
+  attention: sampleView.attention.slice(0, 1),
+  warnings: []
+}
+
 export default defineCheck({
   unconfigured: {
     requests: {
@@ -37,7 +56,7 @@ export default defineCheck({
     }
   },
   worker: {
-    persisted: { plugin: { selectedRunId: 'demo-active', selectedWorkerId: 'w-plan-a1' } },
+    persisted: { plugin: { selectedRunId: 'demo-active', selectedWorkerId: 'w-panel-a1' } },
     requests: {
       'runs.list': () => sampleListing,
       'run.get': () => sampleView
@@ -51,10 +70,10 @@ export default defineCheck({
     }
   },
   details: {
-    persisted: { plugin: { selectedRunId: 'demo-active', selectedTab: 'details' } },
+    persisted: { plugin: { selectedRunId: 'demo-active', detailsOpen: true } },
     requests: {
       'runs.list': () => sampleListing,
-      'run.get': () => sampleView
+      'run.get': () => smallView
     }
   },
   cycle: {
@@ -80,6 +99,123 @@ export default defineCheck({
           }
         ]
       })
+    }
+  },
+  attention: {
+    persisted: { plugin: { selectedRunId: 'demo-active', attentionOpen: true } },
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => smallView
+    }
+  },
+  branches: {
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => {
+        const base = sampleView.workers[0]
+        const worker = (
+          id: string,
+          taskId: string,
+          parentId: string | null,
+          extra: Partial<typeof base> = {}
+        ) => ({
+          ...base,
+          id,
+          taskId,
+          parentWorkerId: parentId,
+          parentState: parentId === null ? ('none' as const) : ('recorded' as const),
+          ...extra
+        })
+        return {
+          ...sampleView,
+          workerTotal: 8,
+          attention: [],
+          attentionTotal: 0,
+          workers: [
+            worker('w-coord-plan', 't-plan', null),
+            worker('w-coord-panel', 't-panel', null),
+            worker('w-coord-docs', 't-docs', null),
+            worker('w-plan-child-a', 't-extra', 'w-coord-plan'),
+            worker('w-plan-child-b', 't-api', 'w-coord-plan', { lifecycle: 'waiting_user' as const }),
+            worker('w-panel-child', 't-panel', 'w-coord-panel'),
+            worker('w-panel-grandchild', 't-docs', 'w-panel-child', { lifecycle: 'reported_done' as const }),
+            worker('w-docs-child', 't-old', 'w-coord-docs', { lifecycle: 'closed' as const })
+          ]
+        }
+      }
+    }
+  },
+  deep: {
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => {
+        const base = sampleView.workers[0]
+        const depth = 15
+        return {
+          ...sampleView,
+          workerTotal: depth,
+          attention: [],
+          attentionTotal: 0,
+          workers: Array.from({ length: depth }, (_, index) => ({
+            ...base,
+            id: 'w-deep-' + index,
+            taskId: 't-plan',
+            parentWorkerId: index === 0 ? null : 'w-deep-' + (index - 1),
+            parentState: index === 0 ? ('none' as const) : ('recorded' as const)
+          }))
+        }
+      }
+    }
+  },
+  'long-text': {
+    persisted: {
+      plugin: {
+        selectedRunId: 'demo-active',
+        selectedWorkerId: 'w-long-worker-identifier-that-does-not-fit-a-narrow-sidebar-card'
+      }
+    },
+    requests: {
+      'runs.list': () => sampleListing,
+      'run.get': () => {
+        const base = sampleView.workers[0]
+        const longTask =
+          '一个非常长的任务标题，用来确认窄侧栏里的节点卡片会截断而不是把面板撑破，同时详情里仍然能看到完整文字'
+        return {
+          ...sampleView,
+          workerTotal: 2,
+          attention: [],
+          attentionTotal: 0,
+          tasks: [
+            ...sampleView.tasks,
+            {
+              id: 't-long',
+              title: longTask,
+              status: 'running' as const,
+              dependencies: ['t-plan'],
+              blockedReason: '',
+              pendingDecision: '',
+              provisional: false,
+              orcaTaskId: null
+            }
+          ],
+          workers: [
+            {
+              ...base,
+              id: 'w-long-worker-identifier-that-does-not-fit-a-narrow-sidebar-card',
+              taskId: 't-long',
+              parentWorkerId: null,
+              parentState: 'none' as const
+            },
+            {
+              ...base,
+              id: 'w-long-child-identifier-also-quite-long-for-the-narrow-card',
+              taskId: 't-long',
+              parentWorkerId: 'w-long-worker-identifier-that-does-not-fit-a-narrow-sidebar-card',
+              parentState: 'recorded' as const
+            }
+          ]
+        }
+      }
     }
   },
   'no-workers': {
