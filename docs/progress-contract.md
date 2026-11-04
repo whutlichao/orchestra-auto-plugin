@@ -97,16 +97,21 @@ never promotes an unresolved worker to a direct report.
 | Parent chain exceeds 12 worker levels | The deeper subtree is listed flat as `depth-limit` rather than dropped or re-parented. |
 | Projection hit the 500-worker cap and the parent is outside it | `unresolved-parent`; shown as "not in the read workers", not as missing. |
 
+Indentation compacts after four levels (`↳↳↳↳+n`); every nested row still
+names its recorded parent, and rows past the depth cap are listed flat in the
+anomaly group rather than re-parented.
+
 Task association follows the same pattern: `none` renders as unrecorded,
 `recorded` with no matching task renders the missing task ID, and `invalid`
-renders an invalid-reference note. A recorded task with no worker's `task_id`
+renders `任务：记录无效`. A recorded task with no worker's `task_id`
 pointing at it is listed separately as unassociated; this is not evidence that
 the task was not executed.
 
-Recorded attention items are attached to the workers that share the task
-(`task-*` IDs) or that the item names (`worker-*` IDs). Run-level items
-(`run-*`) stay in the top-level attention list only. A worker's self-report
-never changes its lifecycle, task status or delivery facts.
+Recorded attention items carry the task or worker they belong to (`taskId` or
+`workerId`). The topology attaches task items to every worker whose `task_id`
+points at that task, and worker items only to the named worker. Run-level items
+have neither field and stay in the top-level attention list only. A worker's
+self-report never changes its lifecycle, task status or delivery facts.
 
 ## `deliveries`
 
@@ -180,8 +185,8 @@ the worker resolves it against its own discovery result.
 | directory entries scanned per root | 1000 |
 | runs listed | 200 |
 | task/worker/delivery view arrays | 500 each |
-| root worker rows rendered | 100 |
-| anomaly worker rows rendered | 100 |
+| root-tree worker rows rendered | 100 (nested rows included) |
+| anomaly-tree worker rows rendered | 100 (nested rows included) |
 | detached task rows rendered | 50 |
 | displayed worker nesting | 12 levels |
 | task/delivery rows rendered | 100 each |

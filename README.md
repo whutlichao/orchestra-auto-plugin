@@ -92,8 +92,8 @@ row: `parent_worker_id` is the only source of worker-to-worker edges.
   absence itself is recorded; the panel does not claim a parent edge.
 - A worker whose recorded parent exists is indented with `↳`, and its row names
   the recorded parent. Deeper recorded chains keep indenting up to 12 worker
-  levels; deeper rows are listed in the anomaly group instead of being silently
-  dropped.
+  levels (after four levels the prefix compacts to `↳↳↳↳+n`); deeper rows are
+  listed in the anomaly group instead of being silently dropped.
 - Each row shows the worker ID, verified lifecycle, recorded attention count,
   stale observation and unobserved start markers, plus the task association.
   Selecting a worker expands its detail inline: task, relation, dispatch,
@@ -117,7 +117,7 @@ Tasks are linked only by each worker's recorded `task_id`:
 
 - A missing `task_id` renders `任务：未记录`.
 - A `task_id` that names no recorded task renders `任务：<id>（未记录于 tasks）`.
-- An invalid `task_id` renders `任务记录无效`.
+- An invalid `task_id` renders `任务：记录无效`.
 - Recorded tasks with no worker pointing at them appear under **未关联 Worker
   的任务**; "unassociated" does not mean "not executed".
 
@@ -130,8 +130,9 @@ failure.
 
 - **运行元数据**: run ID, Orca run ID, mode, phase, schema, source and timestamps.
 - **任务**: status counts and a table with each task's status, worker count,
-  dependencies and notes. The worker count is the number of recorded `task_id`
-  references; 0 is not proof that no work happened.
+  dependencies, notes and its recorded Orca task ID when one exists. The worker
+  count is the number of recorded `task_id` references; 0 is not proof that no
+  work happened.
 - **交付事实**: strict `true` / `false` / unverified counts for `implemented`,
   `integrated`, `merged` and `tracker_closed`, plus the per-task table.
 - **产物**: artifact kind, label and task ID only; references are not rendered.
@@ -150,9 +151,9 @@ state, not as independent acceptance.
 - A run with no `workers` shows an explicit empty state that says this is not
   proof that no execution happened. A missing projection with a positive
   `workerTotal` is called out instead of shown as empty.
-- At most 100 root workers and 100 anomaly workers are rendered (each with its
-  own true total), and at most 50 detached tasks. Counts and truncation notes
-  always use the snapshot's true totals.
+- At most 100 rows in the root-worker tree and 100 rows in the anomaly tree are
+  rendered, with nested rows counted as rows; at most 50 detached tasks are
+  rendered. Counts and truncation notes always use the true totals.
 
 ## Privacy and safety boundaries
 
@@ -172,11 +173,11 @@ The worker enforces these before reading a file:
 
 Limits: 8 MiB per snapshot, 64 MiB per discovery pass, 16 audit roots, 200
 registry descriptors, 1000 directory entries per root, 200 runs, 500 projected
-tasks/workers/deliveries, 100 rendered root workers, 100 rendered anomaly
-workers, 50 detached tasks, 12 displayed worker levels, 100 rows per task or
-delivery table, 50 artifacts, 100 projected attention records (10 rendered),
-and 20 events. Counts remain complete, and truncation is shown with the true
-total.
+tasks/workers/deliveries, 100 rendered rows in the root-worker tree, 100
+rendered rows in the anomaly tree, 50 detached tasks, 12 displayed worker
+levels, 100 rows per task or delivery table, 50 artifacts, 100 projected
+attention records (10 rendered), and 20 events. Counts remain complete, and
+truncation is shown with the true total.
 
 ## Development
 

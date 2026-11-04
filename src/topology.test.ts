@@ -75,7 +75,8 @@ test('links recorded children to their parent worker and carries the task', () =
     nested: 1,
     anomalies: 0,
     detachedTasks: 0,
-    unrecordedTasks: 0
+    workersWithoutRecordedTask: 0,
+    workersWithInvalidTask: 0
   })
 })
 
@@ -136,12 +137,14 @@ test('a missing task association stays explicit', () => {
   assert.equal(byId.get('w-bad-task')?.taskMissing, true)
   assert.equal(topology.detachedTasks.length, 1)
   assert.equal(topology.detachedTasks[0].id, 't-real')
+  assert.equal(topology.counts.workersWithoutRecordedTask, 2)
+  assert.equal(topology.counts.workersWithInvalidTask, 1)
 })
 
 test('attention items reach the workers that share the task', () => {
   const attention: AttentionItem[] = [
-    { id: 'task-blocked:t-panel', kind: 'blocked', text: 'Panel: blocked' },
-    { id: 'worker-lost:w-lost', kind: 'worker-lost', text: 'w-lost: lost' }
+    { id: 'task-blocked:t-panel', kind: 'blocked', text: 'Panel: blocked', taskId: 't-panel' },
+    { id: 'worker-lost:w-lost', kind: 'worker-lost', text: 'w-lost: lost', workerId: 'w-lost' }
   ]
   const topology = topologyOf([
     worker('w-panel', 't-panel'),

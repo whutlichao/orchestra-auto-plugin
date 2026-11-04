@@ -35,7 +35,7 @@ all eight captures.
 | `orca-ui-details.png` | The 细节 tab: run metadata, task counts/table, delivery facts, artifacts and the collapsed events section. |
 | `orca-ui-finished.png` | A completed DEMO run with a clean recorded hierarchy, empty attention and no relationship anomalies. |
 | `orca-ui-no-workers.png` | Empty topology: "没有 Worker 记录" explicitly says this is not proof that no execution happened. |
-| `orca-ui-large-workers.png` | 120 recorded workers: true totals in badges, a visible bounded-list notice and the first 100 direct rows. |
+| `orca-ui-large-workers.png` | 120 recorded workers: true totals in badges, a visible bounded-list notice and the first 100 root-tree rows. |
 | `orca-ui-unavailable.png` | Missing state: unavailable badge, "运行不可用", `progress.json` missing/unreadable message, retry control. |
 | `orca-ui-corrupt.png` | Corrupt snapshot: "快照损坏", invalid-JSON message, retry control. |
 | `orca-ui-ready-before-fix.png` | Historical pre-topology layout, kept only for comparison with the earlier five-tab design. |
@@ -60,7 +60,7 @@ own components-panel runtime by `src/panel.evidence.test.tsx`:
 
 `orca plugin test .` prints the rendered summaries as `UI_EVIDENCE ...` lines;
 the captured output is in `ui-interaction-evidence.txt`. The same suite reports
-49/49 passing tests, and `orca plugin check .` renders thirteen scenarios
+51/51 passing tests, and `orca plugin check .` renders thirteen scenarios
 (`unconfigured`, `empty`, `ready`, `finished`, `worker`, `anomaly`, `details`,
 `cycle`, `no-workers`, `large-workers`, `stale`, `unavailable`, `corrupt`) with
 no panel errors or dropped props.

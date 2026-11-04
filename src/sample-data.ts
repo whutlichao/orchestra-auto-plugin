@@ -63,7 +63,7 @@ export const sampleView: RunView = {
   endedAt: null,
   freshness: 'current',
   tasks: [
-    task('t-plan', '协议与面板设计', 'accepted'),
+    task('t-plan', '协议与面板设计', 'accepted', { orcaTaskId: 'ot-plan-1' }),
     task('t-panel', '实现只读面板', 'running', { dependencies: ['t-plan'] }),
     task('t-api', '等待审计目录权限', 'blocked', {
       dependencies: ['t-plan'],
@@ -247,11 +247,36 @@ export const sampleView: RunView = {
   ],
   eventTotal: 4,
   attention: [
-    { id: 'task-blocked:t-api', kind: 'blocked', text: '等待审计目录权限：需要用户确认审计目录' },
-    { id: 'task-decision:t-docs', kind: 'decision', text: '安装与使用文档：是否同时发布到 Git 安装源？' },
-    { id: 'task-rejected:t-old', kind: 'rejected', text: '旧方案：直读注册表二进制：已打回' },
-    { id: 'worker-lost:w-api-a1', kind: 'worker-lost', text: 'w-api-a1：Worker 失联' },
-    { id: 'worker-failed:w-old-a1', kind: 'worker-failed', text: 'w-old-a1：Worker 失败' }
+    {
+      id: 'task-blocked:t-api',
+      kind: 'blocked',
+      text: '等待审计目录权限：需要用户确认审计目录',
+      taskId: 't-api'
+    },
+    {
+      id: 'task-decision:t-docs',
+      kind: 'decision',
+      text: '安装与使用文档：是否同时发布到 Git 安装源？',
+      taskId: 't-docs'
+    },
+    {
+      id: 'task-rejected:t-old',
+      kind: 'rejected',
+      text: '旧方案：直读注册表二进制：已打回',
+      taskId: 't-old'
+    },
+    {
+      id: 'worker-lost:w-api-a1',
+      kind: 'worker-lost',
+      text: 'w-api-a1：Worker 失联',
+      workerId: 'w-api-a1'
+    },
+    {
+      id: 'worker-failed:w-old-a1',
+      kind: 'worker-failed',
+      text: 'w-old-a1：Worker 失败',
+      workerId: 'w-old-a1'
+    }
   ],
   attentionTotal: 5,
   warnings: ['示例数据仅用于界面演示']
@@ -283,24 +308,24 @@ export const sampleFinishedView: RunView = {
     blockedReason: '',
     pendingDecision: ''
   })),
-  workers: sampleView.workers.map((item) => ({
-    ...item,
-    lifecycle: 'closed' as const,
-    reportedLifecycle: 'reported_done' as const,
-    startConfirmation: 'observed' as const,
-    reportedSummary: '已完成并记录。',
-    freshness: 'current' as const,
-    parentWorkerId:
+  workers: sampleView.workers.map((item) => {
+    const parentId =
       item.id === 'w-panel-a1'
         ? 'w-plan-a1'
         : item.id === 'w-panel-helper'
           ? 'w-panel-a1'
-          : null,
-    parentState:
-      item.id === 'w-panel-a1' || item.id === 'w-panel-helper'
-        ? ('recorded' as const)
-        : ('none' as const)
-  })),
+          : null
+    return {
+      ...item,
+      lifecycle: 'closed' as const,
+      reportedLifecycle: 'reported_done' as const,
+      startConfirmation: 'observed' as const,
+      reportedSummary: '已完成并记录。',
+      freshness: 'current' as const,
+      parentWorkerId: parentId,
+      parentState: parentId ? ('recorded' as const) : ('none' as const)
+    }
+  }),
   attention: [],
   attentionTotal: 0,
   warnings: []

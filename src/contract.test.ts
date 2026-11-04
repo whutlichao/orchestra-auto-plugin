@@ -56,9 +56,12 @@ test('projects a real recorder snapshot without inventing success', () => {
 
   assert.equal(view.events[0].bookkeeping, true)
   assert.equal(view.eventTotal, 14)
-  assert.ok(view.attention.some((item) => item.kind === 'blocked'))
-  assert.ok(view.attention.some((item) => item.kind === 'decision'))
-  assert.ok(view.attention.some((item) => item.kind === 'worker-lost'))
+  const blocked = view.attention.find((item) => item.kind === 'blocked')
+  assert.ok(blocked?.taskId)
+  const decision = view.attention.find((item) => item.kind === 'decision')
+  assert.ok(decision?.taskId)
+  const lost = view.attention.find((item) => item.kind === 'worker-lost')
+  assert.equal(lost?.workerId, 'w-lost-a2')
 
   const serialized = JSON.stringify(view)
   assert.ok(!serialized.includes('/tmp/orchestra-auto-fixture-target'))

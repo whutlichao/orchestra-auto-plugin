@@ -30,6 +30,7 @@ import {
   DELIVERY_FIELDS,
   STALE_SECONDS,
   cleanText,
+  recordedTaskId,
   type ArtifactView,
   type DeliveryField,
   type EventView,
@@ -272,58 +273,50 @@ function WarningLines({ lines }: { lines: string[] }) {
   )
 }
 
-function relationBadge(node: TopologyWorker): string {
-  switch (node.relation) {
-    case 'root':
-      return '直接隶属'
-    case 'child':
-      return '父子关系已记录'
-    case 'missing-parent':
-      return '父节点缺失'
-    case 'invalid-parent':
-      return '父关系无效'
-    case 'unresolved-parent':
-      return '父节点未读取'
-    case 'cycle':
-      return '父关系成环'
-    case 'depth-limit':
-      return '层级过深'
+const RELATION_DISPLAY: Record<
+  WorkerRelation,
+  { badge: string; text: (parent: string) => string }
+> = {
+  root: {
+    badge: '未记录父 Worker',
+    text: () => '未记录父 Worker（顶层行）'
+  },
+  child: {
+    badge: '父子关系已记录',
+    text: (parent) => '父 Worker ' + parent
+  },
+  'missing-parent': {
+    badge: '父节点缺失',
+    text: (parent) => '父 ' + parent + ' 未记录'
+  },
+  'invalid-parent': {
+    badge: '父关系无效',
+    text: () => '父 Worker 记录无效'
+  },
+  'unresolved-parent': {
+    badge: '父节点未读取',
+    text: (parent) => '父 ' + parent + ' 不在已读取的 Worker 中（可能因投影上限）'
+  },
+  cycle: {
+    badge: '父关系成环',
+    text: (parent) => '父关系成环（父 ' + parent + '）'
+  },
+  'depth-limit': {
+    badge: '层级过深',
+    text: (parent) => '层级过深，未继续缩进（父 ' + parent + '）'
   }
 }
 
 function workerTaskText(node: TopologyWorker): string {
   if (node.task) return node.task.title
-  if (node.worker.taskState === 'recorded' && node.worker.taskId !== null) {
-    return node.worker.taskId + '（未记录于 tasks）'
-  }
-  if (node.worker.taskState === 'invalid') return '任务记录无效'
+  const taskId = recordedTaskId(node.worker)
+  if (taskId !== null) return taskId + '（未记录于 tasks）'
+  if (node.worker.taskState === 'invalid') return '记录无效'
   return '未记录'
 }
 
 function relationText(node: TopologyWorker): string {
-  const parent = node.parentId ?? '未记录'
-  switch (node.relation) {
-    case 'root':
-      return '直接隶属协调者（未记录父 Worker）'
-    case 'child':
-      return '父 Worker ' + parent
-    case 'missing-parent':
-      return '父 ' + parent + ' 未记录'
-    case 'invalid-parent':
-      return '父 Worker 记录无效'
-    case 'unresolved-parent':
-      return '父 ' + parent + ' 不在已读取的 Worker 中（可能因投影上限）'
-    case 'cycle':
-      return '父关系成环（父 ' + parent + '）'
-    case 'depth-limit':
-      return '层级过深，未继续缩进（父 ' + parent + '）'
-  }
-}
-
-function relationLine(node: TopologyWorker, depth: number): string {
-  if (depth > 0 || node.relation === 'child') return '父 ' + (node.parentId ?? '未记录')
-  if (node.relation === 'root') return ''
-  return relationText(node)
+  return RELATION_DISPLAY[node.relation].text(node.parentId ?? '未记录')
 }
 
 function lifecycleTone(lifecycle: WorkerLifecycle): Tone {
@@ -382,6 +375,9 @@ function WorkerDetail({ node }: { node: TopologyWorker }) {
     { label: '关系', value: relationText(node) },
     { label: 'Dispatch', value: node.worker.dispatchId ?? '未记录', code: node.worker.dispatchId !== null },
     { label: '尝试', value: node.worker.attempt ?? '未知' },
+    ...(node.descendantCount > 0
+      ? [{ label: '下属 Worker', value: node.descendantCount }]
+      : []),
     { label: '核验生命周期', value: LIFECYCLE_LABEL[node.worker.lifecycle] },
     { label: '自报生命周期', value: LIFECYCLE_LABEL[node.worker.reportedLifecycle] },
     { label: '启动确认', value: START_LABEL[node.worker.startConfirmation] },
@@ -393,7 +389,9 @@ function WorkerDetail({ node }: { node: TopologyWorker }) {
     <Stack gap="sm">
       <Heading level={3}>Worker 详情</Heading>
       <Row gap="xs" wrap>
-        <Badge tone={RELATION_TONE[node.relation]}>{relationBadge(node)}</Badge>
+        <Badge tone={RELATION_TONE[node.relation]}>
+          {RELATION_DISPLAY[node.relation].badge}
+        </Badge>
         <Badge tone="neutral">{LIFECYCLE_LABEL[node.worker.lifecycle]}</Badge>
         {node.worker.freshness === 'stale' ? <Badge tone="warning">观测已过期</Badge> : null}
         {node.worker.startConfirmation === 'unobserved' ? (
@@ -432,9 +430,21 @@ function WorkerRow({
 }) {
   const node = row.node
   const indentation =
-    row.depth > 0 ? '↳'.repeat(Math.min(row.depth, 4)) + (row.depth > 4 ? '…' : '') : ''
-  const task = '任务：' + workerTaskText(node)
-  const relation = relationLine(node, row.depth)
+    row.depth === 0
+      ? ''
+      : row.depth <= 4
+        ? '↳'.repeat(row.depth)
+        : '↳↳↳↳+' + (row.depth - 4)
+  const task =
+    '任务：' +
+    workerTaskText(node) +
+    (node.task ? '（' + TASK_STATUS_LABEL[node.task.status] + '）' : '')
+  const relation =
+    row.depth > 0 || node.relation === 'child'
+      ? '父 ' + (node.parentId ?? '未记录')
+      : node.relation === 'root'
+        ? ''
+        : relationText(node)
   return (
     <Stack gap="xs">
       <Row gap="xs" wrap align="center">
@@ -529,8 +539,15 @@ function TopologySection({
         {topology.counts.anomalies > 0 ? (
           <Badge tone="danger">关系异常 {topology.counts.anomalies}</Badge>
         ) : null}
-        {topology.counts.unrecordedTasks > 0 ? (
-          <Badge tone="warning">未记录任务 {topology.counts.unrecordedTasks}</Badge>
+        {topology.counts.workersWithoutRecordedTask > 0 ? (
+          <Badge tone="warning">
+            未记录任务 {topology.counts.workersWithoutRecordedTask}
+          </Badge>
+        ) : null}
+        {topology.counts.workersWithInvalidTask > 0 ? (
+          <Badge tone="warning">
+            任务记录无效 {topology.counts.workersWithInvalidTask}
+          </Badge>
         ) : null}
         {topology.detachedTasks.length > 0 ? (
           <Badge tone="neutral">未关联任务 {topology.detachedTasks.length}</Badge>
@@ -558,20 +575,12 @@ function TopologySection({
               : '')}
         </Text>
         <Text muted size="xs">
-          未记录 parent_worker_id 的 Worker 直接列在这里；缩进和“父 …”只来自已记录字段。
+          未记录 parent_worker_id 的 Worker 列在顶层；缩进和“父 …”只来自已记录字段。
         </Text>
-        {rootRows.length > WORKER_ROW_LIMIT ||
-        anomalyRows.length > WORKER_ROW_LIMIT ||
-        topology.detachedTasks.length > DETACHED_TASK_LIMIT ? (
-          <Text muted size="xs">
-            为保持可读，下面最多显示 {WORKER_ROW_LIMIT} 个直属 Worker、{WORKER_ROW_LIMIT}{' '}
-            个关系异常 Worker 和 {DETACHED_TASK_LIMIT} 个未关联任务；真实总数见各组标题。
-          </Text>
-        ) : null}
       </Stack>
       {rootRows.length > WORKER_ROW_LIMIT ? (
         <Text muted size="xs">
-          直属 Worker 仅显示前 {WORKER_ROW_LIMIT} 个，共 {rootRows.length} 个。
+          Worker 行仅显示前 {WORKER_ROW_LIMIT} 个（含嵌套行），共 {rootRows.length} 个。
         </Text>
       ) : null}
       {rootShown.length > 0 ? <Stack gap="sm">{renderRows(rootShown)}</Stack> : null}
@@ -587,7 +596,8 @@ function TopologySection({
           </Text>
           {anomalyRows.length > WORKER_ROW_LIMIT ? (
             <Text muted size="xs">
-              异常 Worker 仅显示前 {WORKER_ROW_LIMIT} 个，共 {anomalyRows.length} 个。
+              关系异常中的 Worker 行仅显示前 {WORKER_ROW_LIMIT} 个（含嵌套行），共{' '}
+              {anomalyRows.length} 个。
             </Text>
           ) : null}
           {renderRows(anomalyShown)}
@@ -631,7 +641,7 @@ function TopologySection({
         </Text>
       ) : null}
       <Text muted size="xs">
-        父子关系只来自 parent_worker_id；未记录父 Worker 的显示为直接隶属协调者，父节点缺失、无效、成环或超出读取上限时不会推断归属。
+        父子关系只来自 parent_worker_id；未记录父 Worker 的列在顶层，不声称直接隶属；父节点缺失、无效、成环或超出读取上限时不会推断归属。
       </Text>
     </Stack>
   )
@@ -664,8 +674,9 @@ function RunMeta({ view }: { view: RunView }) {
 function TasksSection({ view }: { view: RunView }) {
   const workerCounts = new Map<string, number>()
   for (const worker of view.workers) {
-    if (worker.taskState !== 'recorded' || worker.taskId === null) continue
-    workerCounts.set(worker.taskId, (workerCounts.get(worker.taskId) ?? 0) + 1)
+    const taskId = recordedTaskId(worker)
+    if (taskId === null) continue
+    workerCounts.set(taskId, (workerCounts.get(taskId) ?? 0) + 1)
   }
   const shown = view.tasks.slice(0, TASK_LIMIT)
   const rows = shown.map((task) => ({
@@ -675,6 +686,7 @@ function TasksSection({ view }: { view: RunView }) {
       title: task.title,
       status: TASK_STATUS_LABEL[task.status],
       workers: workerCounts.get(task.id) ?? 0,
+      orca: task.orcaTaskId ?? '—',
       dependencies: cleanText(task.dependencies.join(', ') || '—', 80),
       note: taskNote(task)
     }
@@ -703,6 +715,7 @@ function TasksSection({ view }: { view: RunView }) {
             { key: 'title', label: '标题', width: 'auto', minWidth: 'sm' },
             { key: 'status', label: '状态', width: 'sm' },
             { key: 'workers', label: 'Worker', width: 'xs', align: 'end' },
+            { key: 'orca', label: 'Orca Task', width: 'md', hideBelow: 'md' },
             { key: 'dependencies', label: '依赖', width: 'md', hideBelow: 'md' },
             { key: 'note', label: '备注', width: 'lg', hideBelow: 'md' }
           ]}

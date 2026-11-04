@@ -4,9 +4,16 @@
 // the projection actually carries, plus each worker's `task_id`. A missing,
 // invalid, unresolved or cyclic parent is reported as such and is never attached
 // to the coordinator or to another worker by guesswork.
-import type { AttentionItem, RunView, TaskView, WorkerView } from './contract'
+import {
+  recordedParentId,
+  recordedTaskId,
+  type AttentionItem,
+  type RunView,
+  type TaskView,
+  type WorkerView
+} from './contract'
 
-/** Breadth of nesting kept below the renderer's Tree item-depth cap of 16. */
+/** Deepest worker chain drawn before the rest is listed flat in the anomaly group. */
 export const MAX_TOPOLOGY_WORKER_DEPTH = 12
 
 export type WorkerRelation =
@@ -36,7 +43,8 @@ export type TopologyCounts = {
   nested: number
   anomalies: number
   detachedTasks: number
-  unrecordedTasks: number
+  workersWithoutRecordedTask: number
+  workersWithInvalidTask: number
 }
 
 export type Topology = {
@@ -66,7 +74,9 @@ function findCycleMembers(
       if (known === 2) break
       if (known === 1) {
         const at = path.indexOf(current)
-        if (at !== -1) for (const member of path.slice(at)) cycles.add(member)
+        if (at !== -1) {
+          for (const member of path.slice(at)) cycles.add(member)
+        }
         break
       }
       state.set(current, 1)
@@ -87,20 +97,21 @@ function relationOf(
 ): WorkerRelation {
   if (cycles.has(worker.id)) return 'cycle'
   if (worker.parentState === 'invalid') return 'invalid-parent'
-  if (worker.parentState === 'none' || worker.parentWorkerId === null) return 'root'
-  if (workers.has(worker.parentWorkerId)) return 'child'
+  const parentId = recordedParentId(worker)
+  if (parentId === null) return 'root'
+  if (workers.has(parentId)) return 'child'
   return projectionTruncated ? 'unresolved-parent' : 'missing-parent'
 }
 
-export function buildTopology(view: TopologyInput): Topology {  const workers = new Map(view.workers.map((worker) => [worker.id, worker]))
+export function buildTopology(view: TopologyInput): Topology {
+  const workers = new Map(view.workers.map((worker) => [worker.id, worker]))
   const tasks = new Map(view.tasks.map((task) => [task.id, task]))
   const projectionTruncated = view.workerTotal > view.workers.length
 
   const parents = new Map<string, string>()
   for (const worker of view.workers) {
-    if (worker.parentState === 'recorded' && worker.parentWorkerId !== null) {
-      parents.set(worker.id, worker.parentWorkerId)
-    }
+    const parentId = recordedParentId(worker)
+    if (parentId !== null) parents.set(worker.id, parentId)
   }
   const cycles = findCycleMembers(workers, parents)
 
@@ -111,30 +122,26 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
     attentionFor.set(workerId, list)
   }
   for (const item of view.attention) {
-    const colon = item.id.indexOf(':')
-    const prefix = colon === -1 ? item.id : item.id.slice(0, colon)
-    const target = colon === -1 ? '' : item.id.slice(colon + 1)
-    if (prefix.startsWith('worker-')) {
-      addAttention(target, item)
-    } else if (prefix.startsWith('task-')) {
+    if (item.workerId !== undefined) {
+      addAttention(item.workerId, item)
+    } else if (item.taskId !== undefined) {
       for (const worker of view.workers) {
-        if (worker.taskState === 'recorded' && worker.taskId === target) {
-          addAttention(worker.id, item)
-        }
+        if (recordedTaskId(worker) === item.taskId) addAttention(worker.id, item)
       }
     }
   }
 
   const childrenOf = new Map<string, WorkerView[]>()
   for (const worker of view.workers) {
-    if (worker.parentState !== 'recorded' || worker.parentWorkerId === null) continue
+    const parentId = recordedParentId(worker)
+    if (parentId === null) continue
     // A cycle member is listed in the anomaly group; it never becomes a child
     // of another member of the same cycle.
     if (cycles.has(worker.id)) continue
-    if (!workers.has(worker.parentWorkerId)) continue
-    const list = childrenOf.get(worker.parentWorkerId) ?? []
+    if (!workers.has(parentId)) continue
+    const list = childrenOf.get(parentId) ?? []
     list.push(worker)
-    childrenOf.set(worker.parentWorkerId, list)
+    childrenOf.set(parentId, list)
   }
 
   const seen = new Set<string>()
@@ -147,7 +154,8 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
     cycle: 0,
     'depth-limit': 0
   }
-  let unrecordedTasks = 0
+  let workersWithoutRecordedTask = 0
+  let workersWithInvalidTask = 0
   const depthLimitedRows: TopologyWorker[] = []
 
   const makeNode = (
@@ -155,12 +163,13 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
     relation: WorkerRelation,
     children: TopologyWorker[]
   ): TopologyWorker => {
-    const task =
-      worker.taskState === 'recorded' && worker.taskId !== null
-        ? tasks.get(worker.taskId) ?? null
-        : null
+    const taskId = recordedTaskId(worker)
+    const task = taskId !== null ? tasks.get(taskId) ?? null : null
     const taskMissing = task === null
-    if (taskMissing) unrecordedTasks += 1
+    if (taskMissing) {
+      if (worker.taskState === 'invalid') workersWithInvalidTask += 1
+      else workersWithoutRecordedTask += 1
+    }
     relationCount[relation] += 1
     const descendantCount = children.reduce((sum, child) => sum + 1 + child.descendantCount, 0)
     return {
@@ -168,7 +177,7 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
       task,
       taskMissing,
       relation,
-      parentId: worker.parentState === 'recorded' ? worker.parentWorkerId : null,
+      parentId: recordedParentId(worker),
       attention: attentionFor.get(worker.id) ?? [],
       children,
       descendantCount
@@ -177,8 +186,9 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
 
   const collectTooDeep = (start: WorkerView) => {
     const queue = [start]
-    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-      if (seen.has(next.id)) continue
+    for (let index = 0; index < queue.length; index += 1) {
+      const next = queue[index]
+      if (next === undefined || seen.has(next.id)) continue
       seen.add(next.id)
       depthLimitedRows.push(makeNode(next, 'depth-limit', []))
       for (const child of childrenOf.get(next.id) ?? []) {
@@ -207,10 +217,12 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
 
   const roots: TopologyWorker[] = []
   const anomalies: TopologyWorker[] = []
+  const relations = new Map<string, WorkerRelation>()
   const rootWorkers: WorkerView[] = []
   const anomalyWorkers: WorkerView[] = []
   for (const worker of view.workers) {
     const relation = relationOf(worker, workers, cycles, projectionTruncated)
+    relations.set(worker.id, relation)
     if (relation === 'root') rootWorkers.push(worker)
     else if (relation !== 'child') anomalyWorkers.push(worker)
   }
@@ -218,13 +230,16 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
     if (!seen.has(worker.id)) roots.push(buildNode(worker, 'root', 1))
   }
   for (const worker of anomalyWorkers) {
-    if (!seen.has(worker.id)) anomalies.push(buildNode(worker, relationOf(worker, workers, cycles, projectionTruncated), 1))
+    if (seen.has(worker.id)) continue
+    const relation = relations.get(worker.id) ?? 'missing-parent'
+    anomalies.push(buildNode(worker, relation, 1))
   }
   anomalies.push(...depthLimitedRows)
 
   const linkedTaskIds = new Set<string>()
   for (const worker of view.workers) {
-    if (worker.taskState === 'recorded' && worker.taskId !== null) linkedTaskIds.add(worker.taskId)
+    const taskId = recordedTaskId(worker)
+    if (taskId !== null) linkedTaskIds.add(taskId)
   }
   const detachedTasks = view.tasks
     .filter((task) => !linkedTaskIds.has(task.id))
@@ -247,7 +262,8 @@ export function buildTopology(view: TopologyInput): Topology {  const workers = 
       nested: relationCount.child,
       anomalies: anomalyRelations.reduce((sum, relation) => sum + relationCount[relation], 0),
       detachedTasks: detachedTasks.length,
-      unrecordedTasks
+      workersWithoutRecordedTask,
+      workersWithInvalidTask
     },
     projectionTruncated,
     depthLimited: depthLimitedRows.length

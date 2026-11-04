@@ -44,7 +44,7 @@ test('renders the coordinator, recorded hierarchy, tasks and attention', async (
   assert.ok(view.find({ text: 'orchestra-auto' }))
   assert.ok(view.find({ text: /协调者 · 本运行/ }))
   assert.ok(view.find({ text: /w-panel-a1/ }))
-  assert.ok(view.find({ text: /任务：实现只读面板 · 父 w-plan-a1/ }))
+  assert.ok(view.find({ text: /任务：实现只读面板（运行中） · 父 w-plan-a1/ }))
   assert.ok(view.find({ text: /需关注 2/ }))
   assert.ok(view.find({ text: /关系异常 · 2/ }))
   assert.ok(view.find({ text: /父 w-api-parent-ghost 未记录/ }))
@@ -73,6 +73,8 @@ test('renders recorded facts and marks missing delivery facts as unverified', as
   await view.select({ label: '运行详情' }, 'details')
   assert.ok(view.find({ text: /未核验/ }))
   assert.ok(view.find({ text: /没有 delivery 不代表成功/ }))
+  assert.ok(view.find({ text: /ot-plan-1/ }))
+  assert.ok(view.columnsOf({ label: '任务' }, { width: 800 }).includes('orca'))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
@@ -96,6 +98,8 @@ test('does not show a finished status for an active run with no verified deliver
   await view.select({ label: '运行详情' }, 'details')
   assert.ok(view.find({ text: /未核验/ }))
   assert.ok(view.find({ text: /没有 delivery 不代表成功/ }))
+  assert.ok(view.find({ text: /ot-plan-1/ }))
+  assert.ok(view.columnsOf({ label: '任务' }, { width: 800 }).includes('orca'))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
@@ -168,8 +172,40 @@ test('a parent cycle is shown as an anomaly, not as a hierarchy', async () => {
   assert.deepEqual(view.refusals, [])
 })
 
-test('renders a large worker set without duplicating or dropping it', async () => {
-  const workers = Array.from({ length: 120 }, (_, index) => ({
+
+test('distinguishes an invalid task reference from an unrecorded task', async () => {
+  view = await mount(panel, {
+    host: hostFor({
+      ...sampleView,
+      workerTotal: 2,
+      attention: [],
+      attentionTotal: 0,
+      workers: [
+        {
+          ...sampleView.workers[0],
+          id: 'w-no-task',
+          taskId: null,
+          taskState: 'none'
+        },
+        {
+          ...sampleView.workers[0],
+          id: 'w-bad-task',
+          taskId: null,
+          taskState: 'invalid'
+        }
+      ]
+    })
+  })
+  assert.ok(view.find({ text: /任务：未记录/ }))
+  assert.ok(view.find({ text: /任务：记录无效/ }))
+  assert.ok(view.find({ text: /未记录任务 1/ }))
+  assert.ok(view.find({ text: /任务记录无效 1/ }))
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
+
+test('bounds a large nested worker set and reports row totals', async () => {
+  const roots = Array.from({ length: 120 }, (_, index) => ({
     ...sampleView.workers[0],
     id: 'w-bulk-' + index,
     taskId: 't-plan',
@@ -177,20 +213,55 @@ test('renders a large worker set without duplicating or dropping it', async () =
     parentState: 'none' as const,
     attempt: 1
   }))
+  const children = Array.from({ length: 120 }, (_, index) => ({
+    ...sampleView.workers[0],
+    id: 'w-bulk-child-' + index,
+    taskId: 't-plan',
+    parentWorkerId: 'w-bulk-' + index,
+    parentState: 'recorded' as const,
+    attempt: 1
+  }))
+  const workers = [...roots, ...children]
   view = await mount(panel, {
     host: hostFor({
       ...sampleView,
       workerTotal: workers.length,
       workers,
-      attention: []
+      attention: [],
+      attentionTotal: 0
     })
   })
-  assert.ok(view.find({ text: /Worker 120/ }))
-  assert.ok(view.find({ text: /快照记录 120 个 Worker/ }))
-  assert.ok(view.find({ text: /直属 Worker 仅显示前 100 个，共 120 个/ }))
-  assert.ok(view.find({ text: /为保持可读/ }))
+  assert.ok(view.find({ text: /Worker 240/ }))
+  assert.ok(view.find({ text: /快照记录 240 个 Worker/ }))
+  assert.ok(view.find({ text: /Worker 行仅显示前 100 个（含嵌套行），共 240 个/ }))
+  assert.ok(view.find({ text: /w-bulk-0/ }))
   assert.equal(view.find({ text: /w-bulk-119/ }), null)
   assert.equal(view.findAll({ type: 'Button' }).length, 100)
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
+
+
+test('compacts deep indentation while keeping the recorded parent visible', async () => {
+  const workers = Array.from({ length: 7 }, (_, index) => ({
+    ...sampleView.workers[0],
+    id: 'w-deep-' + index,
+    taskId: 't-plan',
+    parentWorkerId: index === 0 ? null : 'w-deep-' + (index - 1),
+    parentState: index === 0 ? ('none' as const) : ('recorded' as const),
+    attempt: 1
+  }))
+  view = await mount(panel, {
+    host: hostFor({
+      ...sampleView,
+      workerTotal: workers.length,
+      workers,
+      attention: [],
+      attentionTotal: 0
+    })
+  })
+  assert.ok(view.find({ text: /↳↳↳↳\+2/ }))
+  assert.ok(view.find({ text: /父 w-deep-5/ }))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
