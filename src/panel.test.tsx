@@ -6,6 +6,7 @@ import * as panel from './panel'
 import {
   sampleListing,
   sampleFinishedView,
+  sampleRootsView,
   sampleView,
   unconfiguredListing,
   unavailableSummary
@@ -42,33 +43,78 @@ function hostFor(run: typeof sampleView) {
 /** The drawn element shape the test kit exposes, enough to inspect connector props. */
 type DrawnElement = { type: string; props: Record<string, unknown> }
 
-/** Drawable connector segments: the 1px rails, elbows and ticks of the graph. */
-function edgeSegments(panelView: TestPanel): DrawnElement[] {
+/** Members are joined to the coordinator by 2 px dashed membership ticks. */
+function membershipTicks(panelView: TestPanel): DrawnElement[] {
   return (panelView.findAll({ type: 'Box' }) as DrawnElement[]).filter(
-    (element) => element.props.background === 'muted'
+    (element) =>
+      element.props.border === 'accent' &&
+      element.props.width === 3 &&
+      element.props.height === 2
   )
 }
+
+/**
+ * Recorded parent edges are the solid 1 px lines; membership ticks are 2 px
+ * dashes and the spine is 2 px, so line thickness separates the two kinds.
+ */
+function recordedParentLines(panelView: TestPanel): DrawnElement[] {
+  return (panelView.findAll({ type: 'Box' }) as DrawnElement[]).filter(
+    (element) =>
+      element.props.border === 'accent' &&
+      (element.props.width === 1 || element.props.height === 1)
+  )
+}
+
+test('six top-level stale workers are one coordinator graph, not six stacked cards', async () => {
+  view = await mount(panel, { host: hostFor(sampleRootsView) })
+
+  // Every top-level worker is joined to the coordinator by a drawn membership
+  // edge: no edge could be inferred from a parent record, so the run itself is
+  // the only honest connection and it must be visible.
+  assert.equal(membershipTicks(view).length, 18)
+  // No worker-to-worker edge exists in this projection.
+  assert.equal(recordedParentLines(view).length, 0)
+
+  // The stale observation is a run-level fact: it is stated once and not
+  // repeated as a badge on every node.
+  assert.equal(view.findAll({ text: '观测过期' }).length, 0)
+  assert.equal(view.findAll({ text: /时效 已过期/ }).length, 1)
+
+  // All six nodes are drawn.
+  for (const id of [
+    'w-impl-a1',
+    'w-spec-a1',
+    'w-m2-impl',
+    'w-m2-spec',
+    'w-m2-tickets',
+    'w-tickets-a1'
+  ]) {
+    assert.ok(view.find({ text: new RegExp(id) }))
+  }
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
 
 test('renders the coordinator and the recorded hierarchy as a graph', async () => {
   view = await mount(panel, { host: readyHost() })
   assert.ok(view.find({ text: 'orchestra-auto' }))
   assert.ok(view.find({ text: '协调者' }))
-  assert.ok(view.find({ text: '本运行' }))
-  assert.ok(view.find({ text: '顶层 Worker · 未记录父关系' }))
+  assert.ok(view.find({ text: /本运行/ }))
+  assert.ok(view.find({ text: /运行归属图/ }))
   assert.ok(view.find({ text: /w-plan-a1/ }))
   assert.ok(view.find({ text: /w-panel-a1/ }))
   assert.ok(view.find({ text: /w-panel-helper/ }))
   assert.ok(view.find({ text: /实现只读面板/ }))
   assert.ok(view.find({ text: '运行中' }))
   // Recorded parent edges are drawn as line segments, not as text indentation.
-  assert.ok(edgeSegments(view).length > 0)
+  assert.ok(recordedParentLines(view).length > 0)
   // The graph is the main view: no tab bar hides it.
   assert.equal(view.find({ type: 'Tabs' }), null)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-test('a top-level worker gets no invented parent edge', async () => {
+test('a top-level worker gets a run-membership edge but no invented parent edge', async () => {
   view = await mount(panel, {
     host: hostFor({
       ...sampleView,
@@ -79,13 +125,15 @@ test('a top-level worker gets no invented parent edge', async () => {
     })
   })
   assert.ok(view.find({ text: /w-plan-a1/ }))
-  assert.ok(view.find({ text: '顶层 Worker · 未记录父关系' }))
-  assert.equal(edgeSegments(view).length, 0)
+  assert.ok(view.find({ text: /运行归属图 · 1 个顶层 Worker/ }))
+  // Membership is drawn; no recorded parent edge may exist without a record.
+  assert.equal(membershipTicks(view).length, 3)
+  assert.equal(recordedParentLines(view).length, 0)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
 
-test('a selected node shows its recorded detail inline, and pressing again closes it', async () => {
+test('a selected node shows its recorded detail full width, and both close paths work', async () => {
   view = await mount(panel, { host: readyHost() })
   assert.equal(view.find({ text: /Worker 详情/ }), null)
   await view.press({ type: 'ListItem', text: /w-panel-a1/ })
@@ -94,6 +142,11 @@ test('a selected node shows its recorded detail inline, and pressing again close
   assert.ok(view.find({ text: /核验生命周期/ }))
   assert.ok(view.find({ text: /自报生命周期/ }))
   await view.press({ type: 'ListItem', text: /w-panel-a1/ })
+  assert.equal(view.find({ text: /Worker 详情/ }), null)
+  // The close control beside the detail is a second, explicit way to collapse it.
+  await view.press({ type: 'ListItem', text: /w-panel-a1/ })
+  assert.ok(view.find({ text: /Worker 详情/ }))
+  await view.press({ label: '收起详情' })
   assert.equal(view.find({ text: /Worker 详情/ }), null)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
@@ -204,9 +257,10 @@ test('a parent cycle is shown as an anomaly, not as a hierarchy', async () => {
   })
   assert.ok(view.find({ text: /关系异常 · 2/ }))
   assert.ok(view.find({ text: /父关系成环/ }))
-  assert.ok(view.find({ text: /不会并入协调者/ }))
-  // Cycle members are not attached to a parent: no connector is drawn for them.
-  assert.equal(edgeSegments(view).length, 0)
+  assert.ok(view.find({ text: /不并入协调者/ }))
+  // Cycle members are not attached to the coordinator and have no parent edge.
+  assert.equal(membershipTicks(view).length, 0)
+  assert.equal(recordedParentLines(view).length, 0)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
@@ -272,11 +326,46 @@ test('bounds a large nested worker set and reports the true total', async () => 
     })
   })
   assert.ok(view.find({ text: /240 个 Worker/ }))
-  assert.ok(view.find({ text: /100 \/ 240/ }))
-  assert.ok(view.find({ text: /图中仅显示前 100 个 Worker（含嵌套行），共 240 个/ }))
+  assert.ok(view.find({ text: /50 \/ 120 顶层/ }))
+  assert.ok(view.find({ text: /100 \/ 240 节点/ }))
+  assert.ok(view.find({ text: /本运行 · 50 \/ 120 个顶层 Worker/ }))
+  assert.ok(view.find({ text: /图中仅显示前 100 个 Worker（含嵌套节点），共 240 个/ }))
   assert.ok(view.find({ text: /w-bulk-0/ }))
   assert.equal(view.find({ text: /w-bulk-119/ }), null)
   assert.equal(view.findAll({ type: 'ListItem' }).length, 100)
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+})
+
+test('a member cut by the render budget still states its hidden descendants', async () => {
+  const roots = Array.from({ length: 100 }, (_, index) => ({
+    ...sampleView.workers[0],
+    id: 'w-limit-' + index,
+    taskId: 't-plan',
+    parentWorkerId: null,
+    parentState: 'none' as const
+  }))
+  // The 100th member is the last rendered row; its two children fall outside
+  // the 100-node budget, so the cut count belongs on that member row.
+  const children = [0, 1].map((index) => ({
+    ...sampleView.workers[0],
+    id: 'w-limit-child-' + index,
+    taskId: 't-plan',
+    parentWorkerId: 'w-limit-99',
+    parentState: 'recorded' as const
+  }))
+  view = await mount(panel, {
+    host: hostFor({
+      ...sampleView,
+      workerTotal: roots.length + children.length,
+      workers: [...roots, ...children],
+      attention: [],
+      attentionTotal: 0
+    })
+  })
+  assert.ok(view.find({ text: /还有 2 个下层 Worker 未显示/ }))
+  assert.ok(view.find({ text: /100 个顶层 Worker/ }))
+  assert.ok(view.find({ text: /100 \/ 102 节点/ }))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })
@@ -379,7 +468,8 @@ test('shows the stale warning', async () => {
       }
     })
   })
-  assert.ok(view.find({ text: /过期不等于失败/ }))
+  assert.ok(view.find({ text: /过期≠失败/ }))
+  assert.ok(view.find({ text: /时效 已过期/ }))
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
 })

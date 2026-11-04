@@ -2,7 +2,7 @@
 // and an honest cut count when the render budget is smaller than the tree.
 import { assert, test } from 'orca/testing'
 import type { WorkerView } from './contract'
-import { planGraph } from './graph'
+import { planGraph, planRunGraph } from './graph'
 import type { TopologyWorker } from './topology'
 
 function worker(id: string, parentId: string | null = null): WorkerView {
@@ -125,4 +125,71 @@ test('deep chains keep one rail per recorded ancestor level below the top', () =
     plan.rows.every((row) => row.rails.every((active) => active === false)),
     true
   )
+})
+
+test('top-level workers are paired into two lanes around the coordinator spine', () => {
+  const plan = planRunGraph([node('a'), node('b'), node('c'), node('d'), node('e')], 100)
+  assert.equal(plan.members, 5)
+  assert.deepEqual(
+    plan.rows.map((row) => [row.left?.node.worker.id ?? null, row.right?.node.worker.id ?? null]),
+    [
+      ['a', 'b'],
+      ['c', 'd'],
+      ['e', null]
+    ]
+  )
+  assert.equal(plan.total, 5)
+  assert.equal(plan.truncated, false)
+})
+
+test('a member keeps its recorded subtree in its own lane', () => {
+  const plan = planRunGraph(
+    [node('a', [node('a1', [node('a1x')]), node('a2')]), node('b')],
+    100
+  )
+  assert.equal(plan.members, 2)
+  assert.equal(plan.rows.length, 1)
+  const left = plan.rows[0]?.left
+  const right = plan.rows[0]?.right
+  assert.deepEqual(
+    left?.children.map((row) => [row.node.worker.id, row.depth, row.rails]),
+    [
+      ['a1', 1, []],
+      ['a1x', 2, [true]],
+      ['a2', 1, []]
+    ]
+  )
+  assert.deepEqual(right?.children, [])
+})
+
+test('a lane plan keeps the render budget and its honest cut counts', () => {
+  const tree = [node('a', [node('a1', [node('a1x'), node('a1y')])]), node('b')]
+  const plan = planRunGraph(tree, 2)
+  assert.equal(plan.members, 1)
+  assert.equal(plan.total, 5)
+  assert.equal(plan.shown, 2)
+  assert.equal(plan.truncated, true)
+  assert.deepEqual(
+    plan.rows[0]?.left?.children.map((row) => [row.node.worker.id, row.cutChildren]),
+    [['a1', 2]]
+  )
+  assert.equal(plan.rows[0]?.right, null)
+})
+
+test('a cut member keeps its hidden-descendant count', () => {
+  const plan = planRunGraph([node('a', [node('a1')]), node('b')], 1)
+  assert.equal(plan.members, 1)
+  assert.equal(plan.memberTotal, 2)
+  assert.equal(plan.rows[0]?.left?.cutChildren, 1)
+  assert.equal(plan.total, 3)
+  assert.equal(plan.truncated, true)
+})
+
+test('a zero budget pairs no lanes', () => {
+  const plan = planRunGraph([node('a')], 0)
+  assert.deepEqual(plan.rows, [])
+  assert.equal(plan.members, 0)
+  assert.equal(plan.memberTotal, 1)
+  assert.equal(plan.total, 1)
+  assert.equal(plan.truncated, true)
 })

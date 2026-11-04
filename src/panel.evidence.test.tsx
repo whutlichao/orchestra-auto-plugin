@@ -44,7 +44,7 @@ test('UI evidence: select another run and refresh the listing', async () => {
   const evidence = ['initial: ' + summaryOf(view)]
   assert.ok(view.find({ text: /示例：只读观测面板/ }))
   assert.ok(view.find({ text: '协调者' }))
-  assert.ok(view.find({ text: '顶层 Worker · 未记录父关系' }))
+  assert.ok(view.find({ text: /运行归属图/ }))
 
   await view.press({ type: 'ListItem', text: /w-panel-a1/ })
   evidence.push('after-select-worker: ' + summaryOf(view))

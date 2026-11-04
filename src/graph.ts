@@ -1,18 +1,13 @@
-// Render plan for the recorded topology graph.
+// Render plans for the recorded topology graph.
 //
-// The panel draws nodes as cards and recorded parent edges as connector lines.
-// Lines are real elements, not text indentation: a row reserves one rail cell
-// per recorded ancestor and a rail is drawn only while that ancestor still has a
-// later sibling, so a trunk ends where its branch ends.
+// `planGraph` decides which recorded rows fit the render budget and which rail
+// cells a child needs: a rail is drawn only while its recorded ancestor still
+// has a later sibling, so a trunk ends where its branch ends.
 //
-// Two kinds of edge are deliberately absent:
-//
-// - the run (coordinator) to a worker: no `parent_worker_id` was recorded, so a
-//   top-level row gets no incoming tick at all;
-// - a top-level worker to its siblings: they share no recorded parent, so the
-//   first rail level belongs to children of depth-1 workers, never to them.
-//
-// This module only decides which rows fit the render budget. It never adds a
+// `planRunGraph` groups those rows into one block per top-level worker and pairs
+// the blocks into two lanes around the coordinator spine. Membership (the
+// coordinator-to-member tick) is a run fact drawn by the panel, not a parent
+// edge; a recorded parent edge never crosses a lane. Neither planner adds a
 // node, a parent or a child: every row comes from `buildTopology`.
 import type { TopologyWorker } from './topology'
 
@@ -36,6 +31,38 @@ export type GraphRow = {
 export type GraphPlan = {
   rows: GraphRow[]
   /** Nodes in this graph, including the ones the budget left out. */
+  total: number
+  shown: number
+  truncated: boolean
+}
+
+/**
+ * One top-level worker and the rows of its recorded subtree, in draw order.
+ * `children` keeps the rails the planner already computed for the lane.
+ */
+export type MemberBlock = {
+  node: TopologyWorker
+  children: GraphRow[]
+  /** Nodes hidden below this member because the render budget ran out. */
+  cutChildren: number
+}
+
+/**
+ * Two top-level workers around the coordinator's spine. A projection with an
+ * odd number of members leaves the right lane of the last row empty.
+ */
+export type RunGraphRow = {
+  left: MemberBlock | null
+  right: MemberBlock | null
+}
+
+export type RunGraphPlan = {
+  rows: RunGraphRow[]
+  /** Top-level workers placed in the graph. */
+  members: number
+  /** Top-level workers in the projection, including the ones the budget cut. */
+  memberTotal: number
+  /** Nodes in the graph, including the ones the budget left out. */
   total: number
   shown: number
   truncated: boolean
@@ -98,5 +125,43 @@ export function planGraph(roots: TopologyWorker[], limit: number): GraphPlan {
     total,
     shown: rows.length,
     truncated: rows.length < total
+  }
+}
+
+/**
+ * Plan the run graph: the coordinator's spine with one lane pair per row.
+ *
+ * Only rows from `planGraph` become nodes. A recorded child keeps the lane of
+ * its top-level ancestor and the rails the plan already assigned to it; a
+ * top-level worker with no recorded parent becomes a member block and gets no
+ * rail at all, because the coordinator edge is run membership, not parentage.
+ */
+export function planRunGraph(roots: TopologyWorker[], limit: number): RunGraphPlan {
+  const plan = planGraph(roots, limit)
+  const blocks: MemberBlock[] = []
+  for (const row of plan.rows) {
+    if (row.depth === 0) {
+      blocks.push({ node: row.node, children: [], cutChildren: row.cutChildren })
+    } else {
+      // `planGraph` opens with a depth-0 row, so a child row always has its
+      // member block above it.
+      const current = blocks[blocks.length - 1] as MemberBlock
+      current.children.push(row)
+    }
+  }
+  const rows: RunGraphRow[] = []
+  for (let index = 0; index < blocks.length; index += 2) {
+    rows.push({
+      left: blocks[index] ?? null,
+      right: blocks[index + 1] ?? null
+    })
+  }
+  return {
+    rows,
+    members: blocks.length,
+    memberTotal: roots.length,
+    total: plan.total,
+    shown: plan.shown,
+    truncated: plan.truncated
   }
 }
